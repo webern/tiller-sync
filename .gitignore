@@ -1,0 +1,5 @@
+target/
+**/*.rs.bk
+.idea/
+.ignore/
+.claude/settings.local.json
