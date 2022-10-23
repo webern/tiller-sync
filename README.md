@@ -1,3 +1,4 @@
-# mint
+# fin
 
-This is supposed to be private - please tell me if it is not
+A program for importing financial transactions and balances.
+
