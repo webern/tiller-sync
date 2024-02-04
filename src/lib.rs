@@ -1,4 +1,8 @@
+#![allow(unused)]
+
 pub mod args;
+mod dir;
+mod fs;
 
 use crate::args::Fin;
 use anyhow::Result;
