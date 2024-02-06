@@ -3,50 +3,45 @@ use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 
 pub(crate) struct Dir {
-    home: PathBuf,
+    root: PathBuf,
 }
 
 impl Dir {
-    pub(crate) fn new(home: impl AsRef<Path>) -> Result<Self> {
-        let home = home.as_ref();
+    pub(crate) fn new(root: impl AsRef<Path>) -> Result<Self> {
+        let home = root.as_ref();
         let myself = Self {
-            home: home.to_path_buf(),
+            root: home.to_path_buf(),
         };
-        if myself.dir_layout().is_file() {
-            let contents = fs::read_to_string(myself.dir_layout())?;
+        if myself.layout_file().is_file() {
+            let contents = fs::read_to_string(myself.layout_file())?;
             bail!(
-                "Directory layour {} is unsupported. Is a newer version of fin available?",
+                "Directory layout {} is unsupported. Is a newer version of fin available?",
                 contents
             )
         }
         fs::create_dir_all(myself.config())?;
         fs::create_dir_all(myself.db())?;
-        fs::create_dir_all(myself.backups())?;
-        if !myself.dir_layout().is_file() {
-            fs::write_all(myself.dir_layout(), "1".bytes())
+        if !myself.layout_file().is_file() {
+            fs::write_all(myself.layout_file(), "1".bytes())
                 .context("Unable to write directory layout file")?;
         }
         Ok(myself)
     }
 
-    pub(crate) fn home(&self) -> &Path {
-        self.home.as_path()
+    pub(crate) fn root(&self) -> &Path {
+        self.root.as_path()
     }
 
     pub(crate) fn config(&self) -> PathBuf {
-        self.home().join("config")
+        self.root().join("config")
     }
 
     pub(crate) fn db(&self) -> PathBuf {
-        self.home().join("db")
+        self.root().join("db")
     }
 
-    pub(crate) fn backups(&self) -> PathBuf {
-        self.home().join("backups")
-    }
-
-    pub(crate) fn dir_layout(&self) -> PathBuf {
-        self.home().join(".dir_layout")
+    pub(crate) fn layout_file(&self) -> PathBuf {
+        self.root().join(".dir_layout")
     }
 }
 
@@ -55,11 +50,10 @@ fn create_dir_test() {
     let tempdir = tempfile::TempDir::new().unwrap();
     let home = tempdir.path().join("x");
     let dir = Dir::new(&home).unwrap();
-    assert!(dir.home().is_dir());
+    assert!(dir.root().is_dir());
     assert!(dir.config().is_dir());
     assert!(dir.db().is_dir());
-    assert!(dir.backups().is_dir());
-    assert!(dir.dir_layout().is_file());
+    assert!(dir.layout_file().is_file());
 }
 
 #[test]
@@ -68,11 +62,10 @@ fn create_dir_exists_test() {
     let home = tempdir.path().join("y");
     fs::create_dir_all(&home).unwrap();
     let dir = Dir::new(&home).unwrap();
-    assert!(dir.home().is_dir());
+    assert!(dir.root().is_dir());
     assert!(dir.config().is_dir());
     assert!(dir.db().is_dir());
-    assert!(dir.backups().is_dir());
-    assert!(dir.dir_layout().is_file());
+    assert!(dir.layout_file().is_file());
 }
 
 #[test]
