@@ -1,8 +1,26 @@
-use anyhow::Result;
+use crate::args::Args;
+use crate::error::Result;
 use clap::Parser;
-use fin::args::Fin;
+use log::error;
+use std::process::ExitCode;
 
-fn main() -> Result<()> {
-    let args = Fin::parse();
-    fin::run(args)
+mod args;
+mod error;
+
+#[tokio::main]
+async fn main() -> ExitCode {
+    let args = Args::parse();
+
+    match main_inner(args).await {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(e) => {
+            error!("Exiting with error: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+pub async fn main_inner(args: Args) -> Result<()> {
+    println!("{:?}", args);
+    Ok(())
 }

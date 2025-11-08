@@ -1,16 +1,11 @@
-/*!
+//! These structs provide the CLI interface for the fin CLI.
 
-These structs provide the CLI interface for the fin CLI.
-
-!*/
-
-use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 /// A tool for manipulating financial data.
 #[derive(Debug, Parser)]
-pub struct Fin {
+pub struct Args {
     #[command(subcommand)]
     pub(crate) command: Command,
 }
@@ -26,17 +21,6 @@ pub struct Common {
     /// The directory where fin data and configuration is held. Defaults to ~/.fin
     #[arg(long, env = "FIN_HOME")]
     home: Option<PathBuf>,
-}
-
-impl Common {
-    pub fn home(&self) -> Result<PathBuf> {
-        match &self.home {
-            Some(home) => Ok(home.to_owned()),
-            None => Ok(home::home_dir()
-                .context("Unable to find user home directory")?
-                .join(".fin")),
-        }
-    }
 }
 
 /// Import data from a file.
