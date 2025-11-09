@@ -60,4 +60,6 @@ add a line like the following below:
 
 ### Instruction Imports
 
+- @../docs/ai/CHANGELOG_INSTRUCTIONS.md: Instructions for managing CHANGELOG.md following Keep a
+  Changelog specification
 - @../docs/ai/MARKDOWN.md: Instructions for formatting Markdown
