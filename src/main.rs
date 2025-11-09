@@ -21,6 +21,6 @@ async fn main() -> ExitCode {
 }
 
 pub async fn main_inner(args: Args) -> Result<()> {
-    println!("{:?}", args);
+    println!("{args:?}");
     Ok(())
 }
