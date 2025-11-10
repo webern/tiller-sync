@@ -1,4 +1,4 @@
-//! These structs provide the CLI interface for the fin CLI.
+//! These structs provide the CLI interface for the tiller CLI.
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -18,8 +18,8 @@ pub(crate) enum Command {
 /// Arguments common to all subcommands.
 #[derive(Debug, Parser)]
 pub struct Common {
-    /// The directory where fin data and configuration is held. Defaults to ~/.fin
-    #[arg(long, env = "FIN_HOME")]
+    /// The directory where tiller data and configuration is held. Defaults to ~/.tiller
+    #[arg(long, env = "TILLER_HOME")]
     home: Option<PathBuf>,
 }
 
