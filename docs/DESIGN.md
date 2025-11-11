@@ -132,7 +132,7 @@ The structure of the local directory will look like this:
 │   ├── tiller.sqlite.2025-11-09-001
 │   └── tiller.sqlite.2025-11-09-002
 ├── .secrets
-│   ├── client_secret.json
+│   ├── api_key.json
 │   └── token.json
 ├── config.json
 └── tiller.sqlite
@@ -148,13 +148,13 @@ configuration file looks like this:
   "config_version": "v0.1.0",
   "tiller_sheet": "https://docs.google.com/spreadsheets/d/7KpXm2RfZwNJgs84QhVYno5DU6iM9Wlr3bCzAv1txRpL",
   "backup_copies": 5,
-  "client_secret_path": ".secrets/client_secret.json",
+  "api_key_path": ".secrets/api_key.json",
   "token_path": ".secrets/token.json"
 }
 ```
 
-The `client_secret_path` and `token_path` fields are optional. Paths can be absolute or relative to
-the `config.json` file. If omitted, they default to `$TILLER_HOME/.secrets/client_secret.json` and
+The `api_key_path` and `token_path` fields are optional. Paths can be absolute or relative to
+the `config.json` file. If omitted, they default to `$TILLER_HOME/.secrets/api_key.json` and
 `$TILLER_HOME/.secrets/token.json` respectively.
 
 The term "Local Datastore" can either refer to the directory which contains all of this, or to the
@@ -176,11 +176,11 @@ logging level so that users who use `2>&1` under normal circumstances won't have
 
 ## Google Sheets Authentication
 
-Google Sheets API access requires OAuth credentials. Users must obtain `client_secret.json` from
+Google Sheets API access requires OAuth credentials. Users must obtain `api_key.json` from
 the Google Cloud Console (OAuth 2.0 Desktop App credentials). On first use, running `tiller auth`
 initiates an OAuth flow in the browser, after which a `token.json` file containing access and
 refresh tokens is generated. Both files are stored by default in `$TILLER_HOME/.secrets/`, but
-their locations can be customized via `client_secret_path` and `token_path` in `config.json` (paths
+their locations can be customized via `api_key_path` and `token_path` in `config.json` (paths
 are absolute or relative to `config.json`). Subsequent operations automatically refresh tokens as
 needed using the `yup-oauth2` crate.
 
