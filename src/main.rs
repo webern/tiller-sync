@@ -1,18 +1,16 @@
-use crate::args::Args;
-use crate::error::Result;
 use clap::Parser;
 use env_logger::Builder;
 use log::{debug, error, trace, LevelFilter};
 use std::process::ExitCode;
-
-mod args;
-mod error;
+use tiller_sync::args::Args;
+use tiller_sync::Result;
 
 #[tokio::main]
 async fn main() -> ExitCode {
     let args = Args::parse();
-    init_logger(args.common.log_level);
-    debug!("Log level set to {}", args.common.log_level);
+    let log_level = args.common().log_level();
+    init_logger(log_level);
+    debug!("Log level set to {}", log_level.to_string().to_lowercase());
 
     match main_inner(args).await {
         Ok(_) => ExitCode::SUCCESS,
