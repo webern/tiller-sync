@@ -1,3 +1,4 @@
+mod api;
 pub mod args;
 mod config_file;
 mod error;
