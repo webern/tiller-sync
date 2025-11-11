@@ -23,14 +23,28 @@ use std::str::FromStr;
 #[derive(Debug, Parser, Clone)]
 pub struct Args {
     #[clap(flatten)]
-    pub(crate) common: Common,
+    common: Common,
 
     #[command(subcommand)]
-    pub(crate) command: Command,
+    command: Command,
+}
+
+impl Args {
+    pub fn new(common: Common, command: Command) -> Self {
+        Self { common, command }
+    }
+
+    pub fn common(&self) -> &Common {
+        &self.common
+    }
+
+    pub fn command(&self) -> &Command {
+        &self.command
+    }
 }
 
 #[derive(Subcommand, Debug, Clone)]
-pub(crate) enum Command {
+pub enum Command {
     /// Upload or Download Transactions, Categories and AutoCat tabs to/from your Tiller Sheet.
     Sync(SyncArgs),
 }
@@ -43,16 +57,33 @@ pub struct Common {
     ///
     /// This can be overridden by RUST_LOG. See the env_logger crate for instructions.
     #[arg(long, default_value_t = LevelFilter::Info)]
-    pub(crate) log_level: LevelFilter,
+    log_level: LevelFilter,
 
     /// The directory where tiller data and configuration is held. Defaults to ~/tiller
     #[arg(long, env = "TILLER_HOME", default_value_t = default_tiller_home())]
-    pub(crate) tiller_home: DisplayPath,
+    tiller_home: DisplayPath,
+}
+
+impl Common {
+    pub fn new(log_level: LevelFilter, tiller_home: PathBuf) -> Self {
+        Self {
+            log_level,
+            tiller_home: tiller_home.into(),
+        }
+    }
+
+    pub fn log_level(&self) -> LevelFilter {
+        self.log_level
+    }
+
+    pub fn tiller_home(&self) -> &DisplayPath {
+        &self.tiller_home
+    }
 }
 
 #[derive(Debug, Default, Copy, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum UpDown {
+pub enum UpDown {
     Up,
     #[default]
     Down,
@@ -63,7 +94,7 @@ serde_plain::derive_fromstr_from_deserialize!(UpDown);
 
 /// Upload or Download Transactions, Categories and AutoCat tabs to/from your Tiller Sheet.
 #[derive(Debug, Parser, Clone)]
-pub(crate) struct SyncArgs {
+pub struct SyncArgs {
     /// The direction to sync: "up" or "down"
     direction: UpDown,
 
@@ -72,6 +103,28 @@ pub(crate) struct SyncArgs {
 
     /// The path to the Google OAuth token file, defaults to $TILLER_HOME/.secrets/token.json
     oath_token: Option<PathBuf>,
+}
+
+impl SyncArgs {
+    pub fn new(direction: UpDown, api_key: Option<PathBuf>, oath_token: Option<PathBuf>) -> Self {
+        Self {
+            direction,
+            api_key,
+            oath_token,
+        }
+    }
+
+    pub fn direction(&self) -> UpDown {
+        self.direction
+    }
+
+    pub fn api_key(&self) -> Option<&PathBuf> {
+        self.api_key.as_ref()
+    }
+
+    pub fn oath_token(&self) -> Option<&PathBuf> {
+        self.oath_token.as_ref()
+    }
 }
 
 fn default_tiller_home() -> DisplayPath {
@@ -127,7 +180,11 @@ impl FromStr for DisplayPath {
 }
 
 impl DisplayPath {
-    pub(crate) fn _path(&self) -> &Path {
+    pub fn new(path: PathBuf) -> Self {
+        Self(path)
+    }
+
+    pub fn path(&self) -> &Path {
         &self.0
     }
 }
