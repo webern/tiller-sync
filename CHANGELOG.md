@@ -10,7 +10,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Initial project structure
-- Add design documentation
+- Add design documentation #3
+- Add a config file struct, lib.rs, and args #4
 
 <!-- @formatter:off -->
 
