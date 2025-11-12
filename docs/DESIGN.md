@@ -4,6 +4,40 @@ The tiller app provides two main modes of operation, one for syncing data betwee
 and the user's Tiller Google sheet, and one that provides the MCP interface so that it can be used
 as an MCP tool.
 
+## Project Structure
+
+The codebase follows a modular organization with clear separation of concerns:
+
+### Module Organization
+
+- **`src/api/`** - Google Sheets and OAuth operations
+    - Contains all Google API interactions, OAuth flow, and API client wrappers
+    - Defines traits for API operations to enable mocking in tests
+    - **Does NOT** contain file path resolution logic
+
+- **`src/config.rs`** - Configuration file handling
+    - Manages loading/saving `config.json`
+    - Contains helper functions for resolving credential file paths (api_key.json, token.json)
+    - Handles logic for default paths vs. config-specified paths (relative or absolute)
+
+- **`src/utils.rs`** - Reusable utility functions
+    - General-purpose utilities used across the codebase
+    - File I/O helpers and other common operations
+
+- **`src/args.rs`** - CLI argument parsing
+    - Clap structures for command-line interface
+
+- **`src/home.rs`** - Home directory management
+    - Handles `TILLER_HOME` directory operations
+
+### Design Principles
+
+1. **Separation of Concerns**: API code focuses on API operations; configuration code handles paths
+   and settings
+2. **Testability**: API operations use traits to enable mocking without requiring actual Google
+   credentials
+3. **Reusability**: Common utilities belong in `utils.rs` for use across modules
+
 ## Interface: High Level Overview
 
 ### Syncing
