@@ -4,13 +4,16 @@
 //! the Tiller application including the Google Sheet URL, backup settings, and authentication
 //! file paths.
 
-use crate::utils;
-use anyhow::{Context, Result};
+use crate::{utils, Home, Result};
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 const APP_NAME: &str = "tiller";
 const CONFIG_VERSION: u8 = 1;
+const SECRETS: &str = ".secrets";
+const API_KEY_JSON: &str = "api_key.json";
+const TOKEN_JSON: &str = "token.json";
 
 /// Represents the serialization and deserialization format of the configuration file.
 ///
@@ -137,16 +140,38 @@ impl ConfigFile {
     ///
     /// If the path is relative, it should be interpreted as relative to the config.json file.
     /// If None, defaults to $TILLER_HOME/.secrets/api_key.json
-    pub fn api_key_path(&self) -> Option<&Path> {
-        self.api_key_path.as_deref()
+    pub fn api_key_path(&self) -> PathBuf {
+        self.api_key_path
+            .clone()
+            .unwrap_or_else(|| PathBuf::from(SECRETS).join(API_KEY_JSON))
     }
 
     /// Gets the token path.
     ///
     /// If the path is relative, it should be interpreted as relative to the config.json file.
     /// If None, defaults to $TILLER_HOME/.secrets/token.json
-    pub fn token_path(&self) -> Option<&Path> {
-        self.token_path.as_deref()
+    pub fn token_path(&self) -> PathBuf {
+        self.token_path
+            .clone()
+            .unwrap_or_else(|| PathBuf::from(SECRETS).join(TOKEN_JSON))
+    }
+
+    /// Returns the stored `api_key_path` if it is absolute, otherwise resolves the relative path.
+    pub fn resolve_api_key_path(&self, home: &Home) -> PathBuf {
+        Self::resolve_secrets_file_path(self.api_key_path(), home)
+    }
+
+    /// Returns the stored `token_path` if it is absolute, otherwise resolves the relative path.
+    pub fn resolve_token_path(&self, home: &Home) -> PathBuf {
+        Self::resolve_secrets_file_path(self.token_path(), home)
+    }
+
+    /// Checks if `p` is relative, and if so, resolves it. Returns it unchanged if it is absolute.
+    fn resolve_secrets_file_path(p: PathBuf, home: &Home) -> PathBuf {
+        if p.is_absolute() {
+            return p;
+        }
+        home.secrets_dir().join(p)
     }
 }
 
@@ -177,8 +202,11 @@ mod tests {
         let config = ConfigFile::default();
         assert_eq!(config.tiller_sheet(), "");
         assert_eq!(config.backup_copies(), 5);
-        assert_eq!(config.api_key_path(), None);
-        assert_eq!(config.token_path(), None);
+        assert_eq!(
+            config.api_key_path(),
+            PathBuf::from(SECRETS).join(API_KEY_JSON)
+        );
+        assert_eq!(config.token_path(), PathBuf::from(SECRETS).join(TOKEN_JSON));
     }
 
     #[tokio::test]
@@ -224,8 +252,11 @@ mod tests {
             "https://docs.google.com/spreadsheets/d/minimal"
         );
         assert_eq!(config.backup_copies(), 3);
-        assert_eq!(config.api_key_path(), None);
-        assert_eq!(config.token_path(), None);
+        assert_eq!(
+            config.api_key_path(),
+            PathBuf::from(SECRETS).join(API_KEY_JSON)
+        );
+        assert_eq!(config.token_path(), PathBuf::from(SECRETS).join(TOKEN_JSON));
     }
 
     #[tokio::test]
