@@ -2,8 +2,14 @@
 //! - `api_key.json`: OAuth 2.0 client credentials from Google Cloud Console
 //! - `token.json`: Access and refresh tokens obtained through OAuth consent
 
+use crate::{utils, Result};
+use anyhow::Context;
 use chrono::{DateTime, Utc};
+use google_sheets4::client::serde_with::__private__::{DeError, Deserializer, Serializer};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
+
+const REDIRECT: &str = "http://localhost:3030";
 
 /// Represents the structure of the `api_key.json` file downloaded from Google Cloud Console.
 ///
@@ -25,27 +31,49 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ApiKeyFile {
     /// Wrapper containing the installed application credentials
-    pub installed: InstalledCredentials,
+    installed: InstalledCredentials,
+}
+
+impl ApiKeyFile {
+    /// Loads the OAuth client credentials from api_key.json
+    ///
+    /// # Arguments
+    /// * `path` - Path to the api_key.json file
+    ///
+    /// # Returns
+    /// The parsed ApiKeyFile structure
+    ///
+    /// # Errors
+    /// Returns an error if the file cannot be read or parsed
+    pub async fn load(path: &Path) -> Result<ApiKeyFile> {
+        utils::deserialize(path)
+            .await
+            .context("Unable to read ApiKeyFile")
+    }
+
+    pub(crate) fn redirect_uri(&self) -> &str {
+        self.installed.redirect_uris.value()
+    }
 }
 
 /// The actual OAuth credentials nested within the `api_key.json` file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct InstalledCredentials {
     /// OAuth client ID
-    pub(crate) client_id: String,
+    client_id: String,
 
     /// OAuth client secret
-    pub(crate) client_secret: String,
+    client_secret: String,
 
     /// List of valid redirect URIs for OAuth callbacks
     /// For this application, should contain "http://localhost:3030"
-    pub(crate) redirect_uris: Vec<String>,
+    redirect_uris: RedirectUris,
 
     /// Google's OAuth authorization endpoint
-    pub(crate) auth_uri: String,
+    auth_uri: String,
 
     /// Google's OAuth token endpoint
-    pub(crate) token_uri: String,
+    token_uri: String,
 }
 
 /// Represents the structure of the `token.json` file containing OAuth tokens.
@@ -65,14 +93,91 @@ pub(crate) struct InstalledCredentials {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct TokenFile {
     /// The access token used for API requests
-    pub(crate) access_token: String,
+    access_token: String,
 
     /// The refresh token used to obtain new access tokens
-    pub(crate) refresh_token: String,
+    refresh_token: String,
 
     /// Token type, typically "Bearer"
-    pub(crate) token_type: String,
+    token_type: String,
 
     /// When the access token expires
-    pub(crate) expiry: DateTime<Utc>,
+    expiry: DateTime<Utc>,
+}
+
+impl TokenFile {
+    /// Loads OAuth tokens from token.json
+    ///
+    /// # Arguments
+    /// * `path` - Path to the token.json file
+    ///
+    /// # Returns
+    /// The parsed TokenFile structure
+    ///
+    /// # Errors
+    /// Returns an error if the file cannot be read or parsed
+    pub(crate) async fn load(path: &Path) -> Result<TokenFile> {
+        utils::deserialize(path)
+            .await
+            .context("Unable to read TokenFile")
+    }
+
+    pub(crate) fn expiry(&self) -> DateTime<Utc> {
+        self.expiry
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+struct RedirectUris(Vec<String>);
+
+impl RedirectUris {
+    fn value(&self) -> &str {
+        REDIRECT
+    }
+}
+
+impl Serialize for RedirectUris {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for RedirectUris {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let vec = Vec::<String>::deserialize(deserializer)?;
+        if !vec.iter().any(|s| is_valid_redirect(s)) {
+            return Err(D::Error::custom(format!(
+                "At least one of the redirects needs to be {REDIRECT}, but this was not found. \
+                When creating the redirect URI for your Google API Key, you must include \
+                '{REDIRECT}'"
+            )));
+        }
+        Ok(RedirectUris(vec))
+    }
+}
+
+fn is_valid_redirect(s: &str) -> bool {
+    s == REDIRECT || s == "127.0.0.1:3030"
+}
+
+impl From<ApiKeyFile> for yup_oauth2::ApplicationSecret {
+    fn from(value: ApiKeyFile) -> Self {
+        yup_oauth2::ApplicationSecret {
+            client_id: value.installed.client_id,
+            client_secret: value.installed.client_secret,
+            token_uri: value.installed.token_uri,
+            auth_uri: value.installed.auth_uri,
+            redirect_uris: vec![REDIRECT.to_string()],
+            project_id: None,
+            client_email: None,
+            auth_provider_x509_cert_url: None,
+            client_x509_cert_url: None,
+        }
+    }
 }

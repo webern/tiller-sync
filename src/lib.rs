@@ -1,5 +1,6 @@
 mod api;
 pub mod args;
+pub mod commands;
 mod config;
 mod error;
 mod home;
