@@ -4,16 +4,120 @@
 //! the Tiller application including the Google Sheet URL, backup settings, and authentication
 //! file paths.
 
-use crate::{utils, Home, Result};
+use crate::{utils, Result};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use tokio::fs;
 
 const APP_NAME: &str = "tiller";
 const CONFIG_VERSION: u8 = 1;
 const SECRETS: &str = ".secrets";
 const API_KEY_JSON: &str = "api_key.json";
 const TOKEN_JSON: &str = "token.json";
+
+/// The `Config` object represents the configuration of the app. You instantiate it by providing
+/// the path to `$TILLER_HOME` and from there it loads `$TILLER_HOME/config.json`. It provides
+/// paths to other items that are either configurable or are expected in a certain location within
+/// the tiller home directory.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Config {
+    root: PathBuf,
+    backups: PathBuf,
+    secrets: PathBuf,
+    config_path: PathBuf,
+    config_file: ConfigFile,
+    db: PathBuf,
+}
+
+impl Config {
+    /// This will
+    /// - create the `tiller_home` directory, if it does not exist, and canonicalize it.
+    /// - Load `config.json`, or create it if it does not exist.
+    pub async fn new(tiller_home: impl Into<PathBuf>) -> Result<Self> {
+        let maybe_relative = tiller_home.into();
+        make_dir(&maybe_relative)
+            .await
+            .context("Unable to create tiller home directory")?;
+        let root = fs::canonicalize(&maybe_relative).await.with_context(|| {
+            format!(
+                "Unable to canonicalize the path {}",
+                maybe_relative.to_string_lossy()
+            )
+        })?;
+        let config_path = root.join("config.json");
+        let config_file = match tokio::fs::metadata(&config_path).await {
+            Ok(_) => ConfigFile::load(&config_path).await?,
+            Err(_) => {
+                let config = ConfigFile::default();
+                config
+                    .save(&config_path)
+                    .await
+                    .context("Unable to write default config file")?;
+                config
+            }
+        };
+        let config = Self {
+            root: root.clone(),
+            backups: root.join(".backups"),
+            secrets: root.join(".secrets"),
+            config_path,
+            config_file,
+            db: root.join("tiller.sqlite"),
+        };
+        make_dir(&config.backups).await?;
+        make_dir(&config.secrets).await?;
+        Ok(config)
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn config_path(&self) -> &Path {
+        &self.config_path
+    }
+
+    pub fn db(&self) -> &Path {
+        &self.db
+    }
+
+    pub fn backups_dir(&self) -> &Path {
+        &self.backups
+    }
+
+    pub fn secrets_dir(&self) -> &Path {
+        &self.secrets
+    }
+
+    pub fn tiller_sheet_url(&self) -> &str {
+        &self.config_file.tiller_sheet
+    }
+
+    /// Returns the stored `api_key_path` if it is absolute, otherwise resolves the relative path.
+    pub fn api_key_path(&self) -> PathBuf {
+        self.resolve_secrets_file_path(self.config_file.api_key_path())
+    }
+
+    /// Returns the stored `token_path` if it is absolute, otherwise resolves the relative path.
+    pub fn token_path(&self) -> PathBuf {
+        self.resolve_secrets_file_path(self.config_file.token_path())
+    }
+
+    /// Checks if `p` is relative, and if so, resolves it. Returns it unchanged if it is absolute.
+    fn resolve_secrets_file_path(&self, p: PathBuf) -> PathBuf {
+        if p.is_absolute() {
+            return p;
+        }
+        self.secrets_dir().join(p)
+    }
+}
+
+async fn make_dir(p: &Path) -> Result<()> {
+    fs::create_dir_all(p)
+        .await
+        .with_context(|| format!("Unable to create directory at {}", p.to_string_lossy()))
+}
 
 /// Represents the serialization and deserialization format of the configuration file.
 ///
@@ -29,7 +133,7 @@ const TOKEN_JSON: &str = "token.json";
 /// }
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
-pub struct ConfigFile {
+struct ConfigFile {
     /// Application name, should always be "tiller"
     app_name: String,
 
@@ -109,6 +213,7 @@ impl ConfigFile {
             .context("Unable to write config file")
     }
 
+    #[cfg(test)]
     /// Creates a new ConfigFile with the specified settings.
     pub fn new(
         tiller_sheet: String,
@@ -124,16 +229,6 @@ impl ConfigFile {
             api_key_path,
             token_path,
         }
-    }
-
-    /// Gets the Tiller Google Sheet URL.
-    pub fn tiller_sheet(&self) -> &str {
-        &self.tiller_sheet
-    }
-
-    /// Gets the number of backup copies to keep.
-    pub fn backup_copies(&self) -> u32 {
-        self.backup_copies
     }
 
     /// Gets the API key path.
@@ -155,24 +250,6 @@ impl ConfigFile {
             .clone()
             .unwrap_or_else(|| PathBuf::from(SECRETS).join(TOKEN_JSON))
     }
-
-    /// Returns the stored `api_key_path` if it is absolute, otherwise resolves the relative path.
-    pub fn resolve_api_key_path(&self, home: &Home) -> PathBuf {
-        Self::resolve_secrets_file_path(self.api_key_path(), home)
-    }
-
-    /// Returns the stored `token_path` if it is absolute, otherwise resolves the relative path.
-    pub fn resolve_token_path(&self, home: &Home) -> PathBuf {
-        Self::resolve_secrets_file_path(self.token_path(), home)
-    }
-
-    /// Checks if `p` is relative, and if so, resolves it. Returns it unchanged if it is absolute.
-    fn resolve_secrets_file_path(p: PathBuf, home: &Home) -> PathBuf {
-        if p.is_absolute() {
-            return p;
-        }
-        home.secrets_dir().join(p)
-    }
 }
 
 #[cfg(test)]
@@ -181,8 +258,18 @@ mod tests {
     use tempfile::TempDir;
     use tokio::io::AsyncWriteExt;
 
+    #[tokio::test]
+    async fn test_config() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let home_dir = dir.path().to_owned();
+        let home = Config::new(home_dir).await.unwrap();
+        assert!(fs::read_dir(home.backups_dir()).await.is_ok());
+        assert!(fs::read_dir(home.secrets_dir()).await.is_ok());
+    }
+
     #[test]
-    fn test_config_new() {
+    fn test_config_file_new() {
         let config = ConfigFile::new(
             "https://docs.google.com/spreadsheets/d/test".to_string(),
             10,
@@ -191,17 +278,17 @@ mod tests {
         );
 
         assert_eq!(
-            config.tiller_sheet(),
+            config.tiller_sheet,
             "https://docs.google.com/spreadsheets/d/test"
         );
-        assert_eq!(config.backup_copies(), 10);
+        assert_eq!(config.backup_copies, 10);
     }
 
     #[test]
-    fn test_config_default() {
+    fn test_config_file_default() {
         let config = ConfigFile::default();
-        assert_eq!(config.tiller_sheet(), "");
-        assert_eq!(config.backup_copies(), 5);
+        assert_eq!(config.tiller_sheet, "");
+        assert_eq!(config.backup_copies, 5);
         assert_eq!(
             config.api_key_path(),
             PathBuf::from(SECRETS).join(API_KEY_JSON)
@@ -210,7 +297,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_save_and_load() {
+    async fn test_config_file_save_and_load() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("config.json");
 
@@ -231,7 +318,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_load_with_minimal_config() {
+    async fn test_config_file_load_with_minimal_config() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("config.json");
 
@@ -248,10 +335,10 @@ mod tests {
         let config = ConfigFile::load(&config_path).await.unwrap();
 
         assert_eq!(
-            config.tiller_sheet(),
+            config.tiller_sheet,
             "https://docs.google.com/spreadsheets/d/minimal"
         );
-        assert_eq!(config.backup_copies(), 3);
+        assert_eq!(config.backup_copies, 3);
         assert_eq!(
             config.api_key_path(),
             PathBuf::from(SECRETS).join(API_KEY_JSON)
@@ -260,7 +347,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_load_invalid_app_name() {
+    async fn test_config_file_load_invalid_app_name() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("config.json");
 
@@ -280,7 +367,7 @@ mod tests {
     }
 
     #[test]
-    fn test_serialization_omits_none_fields() {
+    fn test_config_file_serialization_omits_none_fields() {
         let config = ConfigFile::new(
             "https://docs.google.com/spreadsheets/d/test".to_string(),
             5,
@@ -294,7 +381,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_save_file() {
+    async fn test_config_file_save_file() {
         let original = ConfigFile::new(
             "https://docs.google.com/spreadsheets/d/test".to_string(),
             5,
