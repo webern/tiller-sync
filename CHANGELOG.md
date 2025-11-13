@@ -12,6 +12,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Initial project structure
 - Add design documentation #3
 - Add a config file struct, lib.rs, and args #4
+- Implement OAuth #5 and #6
 
 <!-- @formatter:off -->
 
