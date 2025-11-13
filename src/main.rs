@@ -3,8 +3,8 @@ use env_logger::Builder;
 use log::{debug, error, trace, LevelFilter};
 use std::process::ExitCode;
 use tiller_sync::args::{Args, Command};
-use tiller_sync::{commands, ConfigFile};
-use tiller_sync::{Home, Result};
+use tiller_sync::commands;
+use tiller_sync::{Config, Result};
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -26,16 +26,15 @@ pub async fn main_inner(args: Args) -> Result<()> {
     trace!("{args:?}");
 
     // Initialize home directory
-    let home = Home::new(args.common().tiller_home().path()).await?;
-    let config = ConfigFile::load(home.config()).await?;
+    let config = Config::new(args.common().tiller_home().path()).await?;
 
     // Route to appropriate command handler
     match args.command() {
         Command::Auth(auth_args) => {
             if auth_args.verify() {
-                commands::handle_auth_verify(&config, &home).await?;
+                commands::handle_auth_verify(&config).await?;
             } else {
-                commands::handle_auth_command(&config, &home).await?;
+                commands::handle_auth_command(&config).await?;
             }
         }
         Command::Sync(_sync_args) => {
