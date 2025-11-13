@@ -45,6 +45,8 @@ impl Args {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Command {
+    /// Authenticate with Google Sheets via OAuth.
+    Auth(AuthArgs),
     /// Upload or Download Transactions, Categories and AutoCat tabs to/from your Tiller Sheet.
     Sync(SyncArgs),
 }
@@ -91,6 +93,24 @@ pub enum UpDown {
 
 serde_plain::derive_display_from_serialize!(UpDown);
 serde_plain::derive_fromstr_from_deserialize!(UpDown);
+
+/// Authenticate with Google Sheets via OAuth.
+#[derive(Debug, Parser, Clone)]
+pub struct AuthArgs {
+    /// Verify and refresh authentication.
+    #[arg(long)]
+    verify: bool,
+}
+
+impl AuthArgs {
+    pub fn new(verify: bool) -> Self {
+        Self { verify }
+    }
+
+    pub fn verify(&self) -> bool {
+        self.verify
+    }
+}
 
 /// Upload or Download Transactions, Categories and AutoCat tabs to/from your Tiller Sheet.
 #[derive(Debug, Parser, Clone)]
