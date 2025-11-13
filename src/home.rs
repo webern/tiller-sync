@@ -51,10 +51,20 @@ impl Home {
         &self.db
     }
 
+    pub fn backups_dir(&self) -> &Path {
+        &self.backups
+    }
+
+    pub fn secrets_dir(&self) -> &Path {
+        &self.secrets
+    }
+
+    #[allow(dead_code)]
     pub(crate) fn _backups(&self) -> &Path {
         &self.backups
     }
 
+    #[allow(dead_code)]
     pub(crate) fn _secrets(&self) -> &Path {
         &self.secrets
     }
