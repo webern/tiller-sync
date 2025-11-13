@@ -138,7 +138,7 @@ impl ConfigFile {
     /// If the path is relative, it should be interpreted as relative to the config.json file.
     /// If None, defaults to $TILLER_HOME/.secrets/api_key.json
     pub fn api_key_path(&self) -> Option<&Path> {
-        self.api_key_path.as_ref().map(|p| p.as_path())
+        self.api_key_path.as_deref()
     }
 
     /// Gets the token path.
@@ -146,7 +146,7 @@ impl ConfigFile {
     /// If the path is relative, it should be interpreted as relative to the config.json file.
     /// If None, defaults to $TILLER_HOME/.secrets/token.json
     pub fn token_path(&self) -> Option<&Path> {
-        self.token_path.as_ref().map(|p| p.as_path())
+        self.token_path.as_deref()
     }
 }
 
