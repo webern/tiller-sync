@@ -10,10 +10,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Initial project structure
-- Add design documentation #3
-- Add a config file struct, lib.rs, and args #4
-- Implement OAuth #5 #6 #7
+- Add design documentation [#3]
+- Add a config file struct, lib.rs, and args [#4]
+- Implement OAuth [#5], [#6], [#7]
 
 <!-- @formatter:off -->
 
+<!-- Tags -->
+
 [Unreleased]: https://github.com/webern/tiller/compare/ed24ca5...HEAD
+
+<!-- Pull Requests -->
+[#3]: https://github.com/webern/tiller-sync/pull/3
+[#4]: https://github.com/webern/tiller-sync/pull/4
+[#5]: https://github.com/webern/tiller-sync/pull/5
+[#6]: https://github.com/webern/tiller-sync/pull/6
+[#7]: https://github.com/webern/tiller-sync/pull/7
+
+<!-- Issues -->
