@@ -5,8 +5,7 @@
 //! - `tiller auth --verify` - Verify and refresh authentication
 
 use crate::api;
-use crate::config::ConfigFile;
-use crate::{Home, Result};
+use crate::{Config, Result};
 use anyhow::{anyhow, Context};
 use colored::Colorize;
 
@@ -22,12 +21,12 @@ use colored::Colorize;
 ///
 /// # Errors
 /// Returns an error if OAuth flow fails or if api_key.json is missing
-pub async fn handle_auth_command(config: &ConfigFile, home: &Home) -> Result<()> {
+pub async fn handle_auth_command(config: &Config) -> Result<()> {
     eprintln!("{}", "Setting up Google Sheets authentication...".bold());
     eprintln!();
 
-    let api_key = config.resolve_api_key_path(home);
-    let token = config.resolve_token_path(home);
+    let api_key = config.api_key_path();
+    let token = config.token_path();
 
     if tokio::fs::metadata(&api_key).await.is_err() {
         // TODO: Think about this message and send to README instead?
@@ -89,7 +88,7 @@ pub async fn handle_auth_command(config: &ConfigFile, home: &Home) -> Result<()>
 ///
 /// # Errors
 /// Returns an error if verification fails or if credentials are missing
-pub async fn handle_auth_verify(config: &ConfigFile, home: &Home) -> Result<()> {
+pub async fn handle_auth_verify(config: &Config) -> Result<()> {
     eprintln!("{}", "Verifying Google Sheets authentication...".bold());
     eprintln!();
 
@@ -97,20 +96,17 @@ pub async fn handle_auth_verify(config: &ConfigFile, home: &Home) -> Result<()> 
     let token_path = config.token_path();
 
     // Check if credential files exist
-    let api_key_file_path = config.resolve_api_key_path(home);
-    let token_file_path = config.resolve_token_path(home);
-
-    if tokio::fs::metadata(&api_key_file_path).await.is_err() {
+    if tokio::fs::metadata(&api_key_path).await.is_err() {
         return Err(anyhow!(
             "OAuth credentials not found at {}. Run 'tiller auth' first.",
-            api_key_file_path.display()
+            api_key_path.display()
         ));
     }
 
-    if tokio::fs::metadata(&token_file_path).await.is_err() {
+    if tokio::fs::metadata(&token_path).await.is_err() {
         return Err(anyhow!(
             "OAuth tokens not found at {}. Run 'tiller auth' first.",
-            token_file_path.display()
+            token_path.display()
         ));
     }
 
@@ -126,7 +122,7 @@ pub async fn handle_auth_verify(config: &ConfigFile, home: &Home) -> Result<()> 
     eprintln!("  Expiry: {}", token.expiry().to_rfc3339());
 
     // Extract spreadsheet ID from the tiller_sheet URL
-    let spreadsheet_id = extract_spreadsheet_id(config.tiller_sheet())
+    let spreadsheet_id = extract_spreadsheet_id(config.tiller_sheet_url())
         .context("Invalid tiller_sheet URL in config.json")?;
 
     // Create Sheets client and verify access
