@@ -180,7 +180,7 @@ configuration file looks like this:
 {
   "app_name": "tiller",
   "config_version": "v0.1.0",
-  "tiller_sheet": "https://docs.google.com/spreadsheets/d/7KpXm2RfZwNJgs84QhVYno5DU6iM9Wlr3bCzAv1txRpL",
+  "sheet_url": "https://docs.google.com/spreadsheets/d/7KpXm2RfZwNJgs84QhVYno5DU6iM9Wlr3bCzAv1txRpL",
   "backup_copies": 5,
   "api_key_path": ".secrets/api_key.json",
   "token_path": ".secrets/token.json"
@@ -319,7 +319,7 @@ Tests the current authentication state and refreshes tokens when necessary:
 
 1. **Load credentials** from both `api_key.json` and `token.json`
 2. **Create client** using loaded credentials
-3. **Attempt API call** (e.g., get spreadsheet metadata using the configured `tiller_sheet` ID)
+3. **Attempt API call** (e.g., get spreadsheet metadata using the configured `sheet_url` ID)
 4. **Report results**:
     - Success: "Authentication verified successfully"
     - Token expired but refreshable: Automatically refresh and report success
@@ -433,7 +433,7 @@ During the `tiller sync down` call, the following happens.
 - If the datastore does not exist, it is created.
 - A backup of the SQLite database is created.
 - If more than `backup_copies` of the SQLite database exist, the extras are deleted.
-- Three tabs from the `tiller_sheet`, *Transactions*, *Categories*, and *AutoCat*
+- Three tabs from the `sheet_url`, *Transactions*, *Categories*, and *AutoCat*
 - These are held in memory for further processing but also written out to
   `$TILLER_HOME/.backup/download.2025-11-09-001.json`.
 - If there are more than `backup_copies` of `download.*.json` files, the oldest are deleted.

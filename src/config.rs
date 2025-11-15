@@ -90,8 +90,8 @@ impl Config {
         &self.secrets
     }
 
-    pub fn tiller_sheet_url(&self) -> &str {
-        &self.config_file.tiller_sheet
+    pub fn sheet_url_url(&self) -> &str {
+        &self.config_file.sheet_url
     }
 
     /// Returns the stored `api_key_path` if it is absolute, otherwise resolves the relative path.
@@ -126,7 +126,7 @@ async fn make_dir(p: &Path) -> Result<()> {
 /// {
 ///   "app_name": "tiller",
 ///   "config_version": "v0.1.0",
-///   "tiller_sheet": "https://docs.google.com/spreadsheets/d/7KpXm2RfZwNJgs84QhVYno5DU6iM9Wlr3bCzAv1txRpL",
+///   "sheet_url": "https://docs.google.com/spreadsheets/d/7KpXm2RfZwNJgs84QhVYno5DU6iM9Wlr3bCzAv1txRpL",
 ///   "backup_copies": 5,
 ///   "api_key_path": ".secrets/api_key.json",
 ///   "token_path": ".secrets/token.json"
@@ -141,7 +141,7 @@ struct ConfigFile {
     config_version: u8,
 
     /// URL to the Tiller Google Sheet
-    tiller_sheet: String,
+    sheet_url: String,
 
     /// Number of backup copies to keep
     backup_copies: u32,
@@ -162,7 +162,7 @@ impl Default for ConfigFile {
         Self {
             app_name: APP_NAME.to_string(),
             config_version: CONFIG_VERSION,
-            tiller_sheet: String::new(),
+            sheet_url: String::new(),
             backup_copies: 5,
             api_key_path: None,
             token_path: None,
@@ -216,7 +216,7 @@ impl ConfigFile {
     #[cfg(test)]
     /// Creates a new ConfigFile with the specified settings.
     pub fn new(
-        tiller_sheet: String,
+        sheet_url: String,
         backup_copies: u32,
         api_key_path: Option<PathBuf>,
         token_path: Option<PathBuf>,
@@ -224,7 +224,7 @@ impl ConfigFile {
         Self {
             app_name: APP_NAME.to_string(),
             config_version: CONFIG_VERSION,
-            tiller_sheet,
+            sheet_url,
             backup_copies,
             api_key_path,
             token_path,
@@ -278,7 +278,7 @@ mod tests {
         );
 
         assert_eq!(
-            config.tiller_sheet,
+            config.sheet_url,
             "https://docs.google.com/spreadsheets/d/test"
         );
         assert_eq!(config.backup_copies, 10);
@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn test_config_file_default() {
         let config = ConfigFile::default();
-        assert_eq!(config.tiller_sheet, "");
+        assert_eq!(config.sheet_url, "");
         assert_eq!(config.backup_copies, 5);
         assert_eq!(
             config.api_key_path(),
@@ -325,7 +325,7 @@ mod tests {
         let json = r#"{
             "app_name": "tiller",
             "config_version": 1,
-            "tiller_sheet": "https://docs.google.com/spreadsheets/d/minimal",
+            "sheet_url": "https://docs.google.com/spreadsheets/d/minimal",
             "backup_copies": 3
         }"#;
 
@@ -335,7 +335,7 @@ mod tests {
         let config = ConfigFile::load(&config_path).await.unwrap();
 
         assert_eq!(
-            config.tiller_sheet,
+            config.sheet_url,
             "https://docs.google.com/spreadsheets/d/minimal"
         );
         assert_eq!(config.backup_copies, 3);
@@ -354,7 +354,7 @@ mod tests {
         let json = r#"{
             "app_name": "wrong_app",
             "config_version": 1,
-            "tiller_sheet": "https://docs.google.com/spreadsheets/d/test",
+            "sheet_url": "https://docs.google.com/spreadsheets/d/test",
             "backup_copies": 5
         }"#;
 
