@@ -121,9 +121,9 @@ pub async fn handle_auth_verify(config: &Config) -> Result<()> {
     eprintln!("{}", "✓ Token is valid".green());
     eprintln!("  Expiry: {}", token.expiry().to_rfc3339());
 
-    // Extract spreadsheet ID from the tiller_sheet URL
-    let spreadsheet_id = extract_spreadsheet_id(config.tiller_sheet_url())
-        .context("Invalid tiller_sheet URL in config.json")?;
+    // Extract spreadsheet ID from the sheet_url URL
+    let spreadsheet_id = extract_spreadsheet_id(config.sheet_url_url())
+        .context("Invalid sheet_url URL in config.json")?;
 
     // Create Sheets client and verify access
     eprintln!();
