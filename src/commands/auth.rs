@@ -21,7 +21,7 @@ use colored::Colorize;
 ///
 /// # Errors
 /// Returns an error if OAuth flow fails or if api_key.json is missing
-pub async fn handle_auth_command(config: &Config) -> Result<()> {
+pub async fn auth(config: &Config) -> Result<()> {
     eprintln!("{}", "Setting up Google Sheets authentication...".bold());
     eprintln!();
 
@@ -88,7 +88,7 @@ pub async fn handle_auth_command(config: &Config) -> Result<()> {
 ///
 /// # Errors
 /// Returns an error if verification fails or if credentials are missing
-pub async fn handle_auth_verify(config: &Config) -> Result<()> {
+pub async fn auth_verify(config: &Config) -> Result<()> {
     eprintln!("{}", "Verifying Google Sheets authentication...".bold());
     eprintln!();
 
@@ -122,7 +122,7 @@ pub async fn handle_auth_verify(config: &Config) -> Result<()> {
     eprintln!("  Expiry: {}", token.expiry().to_rfc3339());
 
     // Extract spreadsheet ID from the sheet_url URL
-    let spreadsheet_id = extract_spreadsheet_id(config.sheet_url_url())
+    let spreadsheet_id = extract_spreadsheet_id(config.sheet_url())
         .context("Invalid sheet_url URL in config.json")?;
 
     // Create Sheets client and verify access

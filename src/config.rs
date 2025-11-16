@@ -12,9 +12,12 @@ use tokio::fs;
 
 const APP_NAME: &str = "tiller";
 const CONFIG_VERSION: u8 = 1;
+const BACKUP_COPIES: u32 = 5;
 const SECRETS: &str = ".secrets";
 const API_KEY_JSON: &str = "api_key.json";
 const TOKEN_JSON: &str = "token.json";
+const CONFIG_JSON: &str = "config.json";
+const TILLER_SQLITE: &str = "tiller.sqlite";
 
 /// The `Config` object represents the configuration of the app. You instantiate it by providing
 /// the path to `$TILLER_HOME` and from there it loads `$TILLER_HOME/config.json`. It provides
@@ -31,6 +34,70 @@ pub struct Config {
 }
 
 impl Config {
+    /// Creates the data directory, its subdirectories and:
+    /// - Creates an initial `config.json` file using `sheet_url` along with default settings
+    /// - Moves `api_file` into its default location in the data dir.
+    ///
+    /// # Arguments
+    /// - `dir` - The directory that will be the root of data directory, e.g. `$HOME/tiller`
+    /// - `api_file` - The downloaded json needed to start the Google OAuth workflow. This will be
+    ///   moved from the `api_file` path to its default location and name in the data directory.
+    /// - `sheet_url` - The URL of the Google Sheet where the Tiller financial data is stored.
+    ///   e.g.https://docs.google.com/spreadsheets/d/1a7Km9FxQwRbPt82JvN4LzYpH5OcGnWsT6iDuE3VhMjX
+    ///
+    /// # Errors
+    /// - Returns an error if any file operations fail.
+    pub async fn create(dir: impl Into<PathBuf>, api_file: &Path, sheet_url: &str) -> Result<Self> {
+        // Create the directory if it does not exist
+        let maybe_relative = dir.into();
+        make_dir(&maybe_relative)
+            .await
+            .context("Unable to create the tiller home directory")?;
+
+        // Canonicalize the directory path
+        let root = fs::canonicalize(&maybe_relative).await.with_context(|| {
+            format!(
+                "Unable to canonicalize the path {}",
+                maybe_relative.to_string_lossy()
+            )
+        })?;
+
+        // Create the subdirectories
+        let backups_dir = root.join(".backups");
+        make_dir(&backups_dir).await?;
+        let secrets_dir = root.join(".secrets");
+        make_dir(&secrets_dir).await?;
+
+        // Move the Google OAuth API Key file to its default location in the data dir
+        let api_destination = secrets_dir.join(API_KEY_JSON);
+        utils::rename(api_file, api_destination).await?;
+        let config_path = root.join(CONFIG_JSON);
+
+        // Create and save an initial ConfigFile in the datastore
+        let config_file = ConfigFile {
+            app_name: APP_NAME.to_string(),
+            config_version: CONFIG_VERSION,
+            sheet_url: sheet_url.to_string(),
+            backup_copies: BACKUP_COPIES,
+            api_key_path: None,
+            token_path: None,
+        };
+        config_file.save(&config_path).await?;
+
+        // Initialize the path to the SQLite database (which doesn't exist yet)
+        let db = root.join(TILLER_SQLITE);
+
+        // Return a new `Config` object that represents a data directory that is ready to use
+        Ok(Self {
+            root,
+            backups: backups_dir,
+            secrets: secrets_dir,
+            config_path,
+            config_file,
+            db,
+        })
+    }
+
     /// This will
     /// - create the `tiller_home` directory, if it does not exist, and canonicalize it.
     /// - Load `config.json`, or create it if it does not exist.
@@ -82,15 +149,15 @@ impl Config {
         &self.db
     }
 
-    pub fn backups_dir(&self) -> &Path {
+    pub fn backups(&self) -> &Path {
         &self.backups
     }
 
-    pub fn secrets_dir(&self) -> &Path {
+    pub fn secrets(&self) -> &Path {
         &self.secrets
     }
 
-    pub fn sheet_url_url(&self) -> &str {
+    pub fn sheet_url(&self) -> &str {
         &self.config_file.sheet_url
     }
 
@@ -109,7 +176,7 @@ impl Config {
         if p.is_absolute() {
             return p;
         }
-        self.secrets_dir().join(p)
+        self.root.join(p)
     }
 }
 
@@ -257,6 +324,35 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
     use tokio::io::AsyncWriteExt;
+    use utils;
+
+    #[tokio::test]
+    async fn test_config_create() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let home_dir = dir.path().join("tiller_home");
+        let api_key_source_file = dir.path().join("x.txt");
+        let api_key_content = "12345";
+        let sheet_url = "https://example.com/foo/bar123";
+        utils::write(&api_key_source_file, api_key_content)
+            .await
+            .unwrap();
+
+        // Run the function under test:
+        let config = Config::create(&home_dir, &api_key_source_file, &sheet_url)
+            .await
+            .unwrap();
+
+        // Check some values on the config object
+        assert_eq!(sheet_url, config.sheet_url());
+
+        // Check for some files in the directory
+        let found_api_key_content = utils::read(&config.api_key_path()).await.unwrap();
+        assert_eq!(api_key_content, found_api_key_content);
+
+        assert!(config.backups().is_dir());
+        assert!(config.secrets().is_dir());
+    }
 
     #[tokio::test]
     async fn test_config() {
@@ -264,8 +360,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let home_dir = dir.path().to_owned();
         let home = Config::new(home_dir).await.unwrap();
-        assert!(fs::read_dir(home.backups_dir()).await.is_ok());
-        assert!(fs::read_dir(home.secrets_dir()).await.is_ok());
+        assert!(fs::read_dir(home.backups()).await.is_ok());
+        assert!(fs::read_dir(home.secrets()).await.is_ok());
     }
 
     #[test]
