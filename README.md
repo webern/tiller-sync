@@ -66,18 +66,18 @@ After completing the Google Cloud Console setup, initialize your Tiller director
 # Initialize with default location ($HOME/tiller)
 tiller init \
   --sheet-url "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID" \
-  --api-key ~/Downloads/client_secret_*.json
+  --client-secret ~/Downloads/client_secret_*.json
 
 # Or specify a custom location
 tiller init \
   --tiller-home /path/to/custom/location \
   --sheet-url "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID" \
-  --api-key ~/Downloads/client_secret_*.json
+  --client-secret ~/Downloads/client_secret_*.json
 ```
 
 This command will:
 - Create the data directory structure
-- Copy your OAuth credentials to `.secrets/api_key.json`
+- Copy your OAuth credentials to `.secrets/client_secret.json`
 - Create an initial `config.json` with your sheet URL
 
 #### 3. Authenticate with Google
@@ -160,7 +160,7 @@ The default configuration file is located at `~/tiller/config.json`. You can cus
 
 - **tiller_sheet**: URL of your Tiller Google Sheet
 - **backup_copies**: Number of backup copies to retain (default: 5)
-- **api_key_path**: Custom path to `api_key.json` (relative or absolute)
+- **client_secret_path**: Custom path to `client_secret.json` (relative or absolute)
 - **token_path**: Custom path to `token.json` (relative or absolute)
 
 Example configuration:
@@ -171,7 +171,7 @@ Example configuration:
   "config_version": "v0.1.0",
   "tiller_sheet": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID",
   "backup_copies": 5,
-  "api_key_path": ".secrets/api_key.json",
+  "client_secret_path": ".secrets/client_secret.json",
   "token_path": ".secrets/token.json"
 }
 ```
@@ -205,15 +205,15 @@ If that doesn't work, re-authenticate:
 tiller auth
 ```
 
-### "API key file not found"
+### "Client secret file not found"
 
-Ensure you've placed `api_key.json` in the correct location:
+Ensure you've placed `client_secret.json` in the correct location:
 
 ```bash
-ls -la ~/tiller/.secrets/api_key.json
+ls -la ~/tiller/.secrets/client_secret.json
 ```
 
-If the file is missing, repeat [Step 5: Download Credentials](#step-5-download-credentials).
+If the file is missing, you'll need to download the OAuth credentials again from Google Cloud Console.
 
 ### "Google hasn't verified this app" warning
 
@@ -239,7 +239,7 @@ If the browser doesn't open automatically during `tiller auth`:
 Ensure credential files have the correct permissions:
 
 ```bash
-chmod 600 ~/tiller/.secrets/api_key.json
+chmod 600 ~/tiller/.secrets/client_secret.json
 chmod 600 ~/tiller/.secrets/token.json
 ```
 

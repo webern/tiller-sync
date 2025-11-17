@@ -33,7 +33,7 @@ pub async fn main_inner(args: Args) -> Result<()> {
         Command::Init(init_args) => {
             commands::init(
                 args.common().tiller_home(),
-                init_args.api_key(),
+                init_args.client_secret(),
                 init_args.sheet_url(),
             )
             .await
