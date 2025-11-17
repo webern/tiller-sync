@@ -12,7 +12,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Initial project structure
 - Add design documentation [#3]
 - Add a config file struct, lib.rs, and args [#4]
-- Implement OAuth [#5], [#6], [#7]
+- Implement OAuth [#5], [#6], [#7], [#8]
 
 <!-- @formatter:off -->
 
@@ -26,5 +26,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#5]: https://github.com/webern/tiller-sync/pull/5
 [#6]: https://github.com/webern/tiller-sync/pull/6
 [#7]: https://github.com/webern/tiller-sync/pull/7
+[#8]: https://github.com/webern/tiller-sync/pull/8
 
 <!-- Issues -->
