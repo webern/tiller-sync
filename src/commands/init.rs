@@ -4,19 +4,20 @@ use std::path::Path;
 
 /// Creates the data directory, its subdirectories and:
 /// - Creates an initial `config.json` file using `sheet_url` along with default settings
-/// - Moves `api_file` into its default location in the data dir.
+/// - Moves `secret_file` into its default location in the data dir.
 ///
 /// # Arguments
 /// - `tiller_home` - The directory that will be the root of data directory, e.g. `$HOME/tiller`
-/// - `api_file` - The downloaded json needed to start the Google OAuth workflow. This will be
-///   moved from the `api_file` path to its default location and name in the data directory.
+/// - `secret_file` - The downloaded OAuth 2.0 client credentials JSON needed to start the Google
+///   OAuth workflow. This will be moved from the `secret_file` path to its default location and
+///   name in the data directory.
 /// - `sheet_url` - The URL of the Google Sheet where the Tiller financial data is stored.
 ///   e.g.https://docs.google.com/spreadsheets/d/1a7Km9FxQwRbPt82JvN4LzYpH5OcGnWsT6iDuE3VhMjX
 ///
 /// # Errors
 /// - Returns an error if any file operations fail.
-pub async fn init(tiller_home: &Path, api_key_file: &Path, sheet_url: &str) -> crate::Result<()> {
-    let _config = Config::create(tiller_home, api_key_file, sheet_url)
+pub async fn init(tiller_home: &Path, secret_file: &Path, sheet_url: &str) -> crate::Result<()> {
+    let _config = Config::create(tiller_home, secret_file, sheet_url)
         .await
         .context("Unable to create the data directory and configs");
     eprintln!("Successfully created the tiller directory and config");
