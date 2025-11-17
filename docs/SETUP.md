@@ -78,70 +78,17 @@ Before creating credentials, you must configure the OAuth consent screen.
    <img src="docs/images/setup-06c-desktop-app-name.jpg" alt="drawing" width="300" border="1"/>
 6. Click **"Create"**
 7. A dialog will appear showing your **Client ID** and **Client Secret**
-    - Download the JSON file and rename it to api_key.json  
+    - Click **"Download JSON"** to download the credentials file
       <img src="docs/images/setup-06d-creds-dialog.jpg" alt="drawing" width="300" border="1"/>
 8. Click **"OK"** to close the dialog
 
-### Step 7: Move the Downloaded File
+### Step 7: Note Your Downloaded File Location
 
-1. In the previous step you downloaded a JSON file, if you didn't rename it, do so now:
-    - `client_secret_xxxxx.apps.googleusercontent.com.json` -> `api_key.json`
-2. **Move the file** to your Tiller home directory:
-   ```bash
-   # Create the Tiller directories
-   mkdir -p ~/tiller/.secrets
+In the previous step you downloaded a JSON file. Take note of where it was saved (typically your Downloads folder). The filename will look like:
+- `client_secret_xxxxx.apps.googleusercontent.com.json`
 
-   # Move the downloaded file (adjust the source path to your Downloads folder)
-   mv ~/Downloads/api_key.json ~/tiller/.secrets/api_key.json
+You don't need to rename or move this file yet - the `tiller init` command will handle that for you.
 
-   # Set restrictive permissions
-   chmod 600 ~/tiller/.secrets/api_key.json
-   ```
+### You're Done with Google Cloud Setup! 🎉
 
-### Step 8: Authenticate Tiller Sync
-
-Now that you have your OAuth credentials set up, you can authenticate Tiller Sync:
-
-1. Run the authentication command:
-   ```bash
-   tiller auth
-   ```
-
-2. The command will:
-    - Automatically open your web browser to Google's authorization page
-    - If the browser doesn't open automatically, copy the URL displayed in the terminal
-
-3. In the browser:
-    - Select the Google account you use for Tiller
-    - You may see a warning that "Google hasn't verified this app"
-        - Click **"Advanced"**
-        - Click **"Go to Tiller Sync (unsafe)"**
-    - Review the permissions requested
-    - Click **"Allow"**
-
-> **Screenshot needed**: `docs/images/setup-10-oauth-consent.png`
->
-> Show the Google OAuth consent screen with the "Allow" button visible.
-
-4. After clicking "Allow", you should see a success message in your browser
-5. Return to your terminal - you should see:
-   ```
-   ✓ Authorization successful!
-   ✓ Tokens saved to: /Users/you/tiller/.secrets/token.json
-   ```
-
-6. Verify your authentication:
-   ```bash
-   tiller auth verify
-   ```
-
-   You should see:
-   ```
-   ✓ Authentication verified successfully
-     Spreadsheet: Tiller Foundation Template
-     Access: Read/Write
-   ```
-
-### You're Done the Hard Part 😅
-
-Return to the [readme](../README.md) for the fun parts.
+You now have your OAuth credentials set up. Return to the [README](../README.md#initial-setup) to continue with the `tiller init` and `tiller auth` commands.
