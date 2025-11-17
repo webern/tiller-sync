@@ -16,7 +16,7 @@ async fn main() -> ExitCode {
     match main_inner(args).await {
         Ok(_) => ExitCode::SUCCESS,
         Err(e) => {
-            error!("Exiting with error: {e}");
+            error!("Exiting with error: {e:?}");
             ExitCode::FAILURE
         }
     }
