@@ -45,6 +45,23 @@ impl Args {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Command {
+    /// Create the data directory and initialize the configuration files.
+    ///
+    /// This is the first command you should run when setting up the tiller CLI. You need to get a
+    /// few things ready beforehand.
+    ///
+    /// - Decide what directory you want to store data in and pass this as --tiller-home. By
+    ///   default, It will be $HOME/tiller. If you want it somewhere else then you should specify
+    ///   it.
+    ///
+    /// - Get the URL of your Tiller Google Sheet and pass it as --sheet-url.
+    ///
+    /// - Set up your Google Sheets API Access credentials and download them to a file. You will
+    ///   pass this as --api-key. Unfortunately, this is a process that requires a lot of steps.
+    ///   Detailed instructions have been provided in the GitHub documentation, please see
+    ///   https://github.com/webern/tiller-sync for help with this.
+    ///
+    Init(InitArgs),
     /// Authenticate with Google Sheets via OAuth.
     Auth(AuthArgs),
     /// Upload or Download Transactions, Categories and AutoCat tabs to/from your Tiller Sheet.
@@ -83,6 +100,37 @@ impl Common {
     }
 }
 
+/// (Not shown): Args for the `tiller init` command.
+#[derive(Debug, Parser, Clone)]
+pub struct InitArgs {
+    /// The URL to your Tiller Google sheet. It looks like this:
+    /// https://docs.google.com/spreadsheets/d/1a7Km9FxQwRbPt82JvN4LzYpH5OcGnWsT6iDuE3VhMjX
+    #[arg(long)]
+    sheet_url: String,
+
+    /// The path to your downloaded OAuth API credentials. This file will be copied to the default
+    /// secrets location in the main data directory.
+    #[arg(long)]
+    api_key: PathBuf,
+}
+
+impl InitArgs {
+    pub fn new(sheet_url: impl Into<String>, api_key: impl Into<PathBuf>) -> Self {
+        Self {
+            sheet_url: sheet_url.into(),
+            api_key: api_key.into(),
+        }
+    }
+
+    pub fn sheet_url(&self) -> &str {
+        &self.sheet_url
+    }
+
+    pub fn api_key(&self) -> &Path {
+        &self.api_key
+    }
+}
+
 #[derive(Debug, Default, Copy, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UpDown {
@@ -94,7 +142,7 @@ pub enum UpDown {
 serde_plain::derive_display_from_serialize!(UpDown);
 serde_plain::derive_fromstr_from_deserialize!(UpDown);
 
-/// Authenticate with Google Sheets via OAuth.
+/// (Not shown): Args for the `tiller auth` command.
 #[derive(Debug, Parser, Clone)]
 pub struct AuthArgs {
     /// Verify and refresh authentication.
@@ -112,7 +160,7 @@ impl AuthArgs {
     }
 }
 
-/// Upload or Download Transactions, Categories and AutoCat tabs to/from your Tiller Sheet.
+/// (Not shown): Args for the `tiller sync` command.
 #[derive(Debug, Parser, Clone)]
 pub struct SyncArgs {
     /// The direction to sync: "up" or "down"

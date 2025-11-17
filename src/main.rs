@@ -30,11 +30,19 @@ pub async fn main_inner(args: Args) -> Result<()> {
 
     // Route to appropriate command handler
     match args.command() {
+        Command::Init(init_args) => {
+            commands::init(
+                args.common().tiller_home(),
+                init_args.api_key(),
+                init_args.sheet_url(),
+            )
+            .await
+        }
         Command::Auth(auth_args) => {
             if auth_args.verify() {
-                commands::handle_auth_verify(&config).await?;
+                commands::auth_verify(&config).await
             } else {
-                commands::handle_auth_command(&config).await?;
+                commands::auth(&config).await
             }
         }
         Command::Sync(_sync_args) => {
@@ -42,8 +50,6 @@ pub async fn main_inner(args: Args) -> Result<()> {
             unimplemented!("Sync command not yet implemented");
         }
     }
-
-    Ok(())
 }
 
 /// Initializes the env_logger.
