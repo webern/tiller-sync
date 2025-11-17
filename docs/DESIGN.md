@@ -40,6 +40,38 @@ The codebase follows a modular organization with clear separation of concerns:
 
 ## Interface: High Level Overview
 
+### Initialization
+
+Before using Tiller Sync, users must initialize their local directory structure. This is typically
+the first command users run after setting up Google Cloud OAuth credentials.
+
+```bash
+# Initialize with default location ($HOME/tiller)
+tiller init \
+  --sheet-url "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID" \
+  --api-key ~/Downloads/client_secret_*.json
+
+# Or specify a custom location
+tiller init \
+  --tiller-home /path/to/custom/location \
+  --sheet-url "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID" \
+  --api-key ~/Downloads/client_secret_*.json
+```
+
+The `tiller init` command:
+
+- Creates the data directory structure (including `.secrets/` and `.backups/` subdirectories)
+- **Moves** the OAuth credentials file to `.secrets/api_key.json`
+- Creates an initial `config.json` with the provided sheet URL and default settings
+
+**Arguments:**
+
+- `--sheet-url`: URL of the user's Tiller Google Sheet (required)
+- `--api-key`: Path to the downloaded OAuth credentials file from Google Cloud Console (required)
+- `--tiller-home`: Custom location for the tiller directory (optional, defaults to `$HOME/tiller`)
+
+After running `tiller init`, users should run `tiller auth` to complete OAuth authentication.
+
 ### Syncing
 
 Uploading local changes to the Tiller Google Sheet:
@@ -160,7 +192,7 @@ the Rust `dirs` crate.)
 The structure of the local directory will look like this:
 
 ```
-├── .backup
+├── .backups
 │   ├── download.2025-11-09-001.json
 │   ├── tiller.sqlite.2025-11-08-001
 │   ├── tiller.sqlite.2025-11-09-001
@@ -179,13 +211,16 @@ configuration file looks like this:
 ```json
 {
   "app_name": "tiller",
-  "config_version": "v0.1.0",
+  "config_version": 1,
   "sheet_url": "https://docs.google.com/spreadsheets/d/7KpXm2RfZwNJgs84QhVYno5DU6iM9Wlr3bCzAv1txRpL",
   "backup_copies": 5,
   "api_key_path": ".secrets/api_key.json",
   "token_path": ".secrets/token.json"
 }
 ```
+
+**Note:** The `config_version` value is not intended to match the release version. It is an
+independent identifier that can be used to handle breaking deserialization changes in the future.
 
 The `api_key_path` and `token_path` fields are optional. Paths can be absolute or relative to
 the `config.json` file. If omitted, they default to `$TILLER_HOME/.secrets/api_key.json` and
@@ -214,20 +249,30 @@ Google Sheets API access requires OAuth 2.0 credentials. The authentication work
 an initial setup phase where users obtain credentials and complete OAuth consent, followed by
 automatic token management for ongoing operations.
 
-The implementation will use **`sheets`** crate (from `oxidecomputer/third-party-api-clients`).
+The implementation uses:
+
+- **`yup-oauth2`** - OAuth 2.0 authentication and token management
+- **`google-sheets4`** - Google Sheets API client library
+
+These libraries handle most of the OAuth complexity automatically, including:
+
+- Local HTTP server for OAuth callback (on port 3030)
+- Token persistence to disk
+- Automatic token refresh when expired
+- Browser opening for authorization
 
 ### Code Organization
 
 All Google Sheets and Google Auth related code will be located in `src/api/`. This includes:
 
-- OAuth authentication flow implementation
-- Google Sheets client wrapper
-- Token management
-- API interaction traits
+- OAuth authentication flow implementation (`src/api/oauth.rs`)
+- Google Sheets client wrapper (`src/api/sheets_client.rs`)
+- Credential file structures (`src/api/files.rs`)
+- Token management (handled by `yup-oauth2`)
 
 To enable testing, we will wrap sheets and OAuth operations in a trait that can be mocked and
-injected. The production code will use implementations backed by the `sheets` crate, while tests
-will use mock implementations.
+injected. The production code will use implementations backed by `yup-oauth2` and `google-sheets4`,
+while tests will use mock implementations.
 
 ### Credential Files
 
@@ -256,14 +301,11 @@ The application will extract `client_id`, `client_secret`, and the first `redire
 file.
 
 **Important**: When creating OAuth credentials in Google Cloud Console, users must set the redirect
-URI
-to `http://localhost:3030`. This URI must match exactly what is configured in the Google Cloud
-Console
-and what appears in the downloaded `api_key.json` file.
+URI to `http://localhost:3030`. This URI must match exactly what is configured in the Google Cloud
+Console and what appears in the downloaded `api_key.json` file.
 
-During the OAuth flow, our application will run a temporary local HTTP server on port 3030 to
-capture
-the authorization callback from Google.
+During the OAuth flow, the `yup-oauth2` library automatically runs a temporary local HTTP server on
+port 3030 to capture the authorization callback from Google.
 
 #### 2. `token.json` - Access and Refresh Tokens
 
@@ -285,29 +327,27 @@ Generated after successful OAuth consent flow. The file contains:
 The `tiller auth` command guides users through the OAuth consent flow:
 
 1. **Load OAuth credentials** from `api_key.json`
-2. **Generate consent URL** using `Client::user_consent_url()` with required scopes:
-    - `https://www.googleapis.com/auth/spreadsheets` (read/write access)
-3. **Open browser** automatically (using `open` crate or similar)
-4. **Display consent URL** to terminal (fallback if browser open fails)
-5. **Capture authorization code**:
-    - The `sheets` crate does NOT provide a local server; we must implement this ourselves
-    - Start a temporary HTTP server on `localhost:3030` using `tiny_http` or `hyper`
-    - When Google redirects to `http://localhost:3030?code=AUTH_CODE&state=STATE`, capture the
-      request
-    - Extract `code` and `state` query parameters from the callback URL
-    - Respond to the browser with a simple HTML page: "Authorization successful! You can close this
-      window."
-    - Shut down the temporary server immediately after receiving the callback
-6. **Exchange code for tokens** using `Client::get_access_token(code, state)`
-7. **Save tokens** to `token.json`
-8. **Confirm success** to user
+2. **Validate redirect URI** - Ensures the file contains `http://localhost:3030` or `127.0.0.1:3030`
+3. **Create authenticator** using `yup_oauth2::InstalledFlowAuthenticator` with:
+    - Required scope: `https://www.googleapis.com/auth/spreadsheets` (read/write access)
+    - `InstalledFlowReturnMethod::HTTPRedirect` on port 3030
+4. **Trigger OAuth flow** - The `yup-oauth2` library automatically:
+    - Generates the consent URL
+    - Opens the user's browser to the authorization page
+    - Starts a temporary HTTP server on `localhost:3030`
+    - Captures the authorization callback from Google
+    - Exchanges the authorization code for access and refresh tokens
+    - Saves tokens to `token.json`
+    - Shuts down the temporary server
+5. **Confirm success** to user
 
 **Error Handling:**
 
 - If `api_key.json` is missing, provide clear instructions for obtaining it from Google Cloud
   Console
-- If OAuth flow times out (e.g., 5 minute timeout), exit with error message
-- If token exchange fails, display error and suggest retrying
+- If `api_key.json` doesn't contain the correct redirect URI (`http://localhost:3030`), display an
+  error
+- If OAuth flow times out or fails, display error and suggest retrying
 
 #### Verification and Refresh: `tiller auth verify`
 
@@ -330,32 +370,40 @@ Tests the current authentication state and refreshes tokens when necessary:
 All commands that interact with Google Sheets will use a consistent client creation pattern:
 
 ```rust
-async fn create_sheets_client(config: &Config) -> Result<sheets::Client> {
+use google_sheets4::Sheets;
+use hyper::client::HttpConnector;
+use hyper_rustls::HttpsConnector;
+
+async fn create_sheets_client(
+    api_key_path: &Path,
+    token_path: &Path,
+) -> Result<Sheets<HttpsConnector<HttpConnector>>> {
     // 1. Load api_key.json
-    let api_key_path = resolve_path(&config.api_key_path, &config)?;
     let api_key_content = fs::read_to_string(api_key_path)?;
     let api_key: ApiKeyFile = serde_json::from_str(&api_key_content)?;
 
-    // 2. Load token.json
-    let token_path = resolve_path(&config.token_path, &config)?;
-    let token_content = fs::read_to_string(token_path)?;
-    let token: TokenFile = serde_json::from_str(&token_content)?;
+    // 2. Create authenticator using yup-oauth2
+    // The authenticator handles token loading, refresh, and persistence automatically
+    let auth = yup_oauth2::InstalledFlowAuthenticator::builder(
+        api_key.installed.clone(),
+        yup_oauth2::InstalledFlowReturnMethod::HTTPRedirect,
+    )
+        .persist_tokens_to_disk(token_path)
+        .build()
+        .await?;
 
-    // 3. Create client with credentials
-    let client = sheets::Client::new(
-        api_key.installed.client_id,
-        api_key.installed.client_secret,
-        api_key.installed.redirect_uris[0].clone(),
-        token.access_token,
-        token.refresh_token,
+    // 3. Create HTTPS connector
+    let connector = hyper_rustls::HttpsConnectorBuilder::new()
+        .with_native_roots()?
+        .https_or_http()
+        .enable_http1()
+        .build();
+
+    // 4. Create Google Sheets client
+    let client = Sheets::new(
+        hyper::Client::builder().build(connector),
+        auth,
     );
-
-    // 4. Check if token is expired (optional optimization)
-    if token.expiry < Utc::now() {
-        log::info!("Access token expired, refreshing...");
-        client.refresh_access_token().await?;
-        // Save refreshed token back to token.json
-    }
 
     Ok(client)
 }
@@ -363,14 +411,16 @@ async fn create_sheets_client(config: &Config) -> Result<sheets::Client> {
 
 ### Automatic Token Refresh
 
-The `sheets` crate handles token refresh automatically through its `refresh_access_token()` method.
-The application should:
+The `yup-oauth2` library handles token refresh automatically. When creating the authenticator with
+`persist_tokens_to_disk()`, it will:
 
-1. **Catch authentication errors** during API operations
-2. **Attempt token refresh** if error indicates expired token
-3. **Retry original operation** after successful refresh
-4. **Save new tokens** to `token.json` for future use
-5. **Fail gracefully** if refresh fails, prompting user to run `tiller auth`
+1. **Load existing tokens** from `token.json` if available
+2. **Check token expiration** before each API call
+3. **Automatically refresh** if the access token is expired
+4. **Save refreshed tokens** back to `token.json`
+5. **Fail gracefully** if refresh fails (e.g., refresh token is invalid)
+
+No manual token management is required - the library handles everything transparently.
 
 ### Required OAuth Scopes
 
@@ -384,44 +434,54 @@ AutoCat sheets).
 ### Security Considerations
 
 1. **File Permissions**: Ensure `.secrets/` directory and credential files have restrictive
-   permissions (0600 on Unix-like systems)
+   permissions (0600 on Unix-like systems). The implementation sets these automatically on Unix
+   systems.
 2. **No Logging**: Never log credential values, tokens, or client secrets
 3. **Error Messages**: Sanitize error messages to avoid leaking credential information
 4. **Token Storage**: Store tokens as-is without additional encryption (filesystem permissions
-   provide security)
-5. **Redirect URI Security**: The local HTTP server for OAuth callback should:
-    - Bind only to `localhost` or `127.0.0.1`
-    - Shut down immediately after receiving callback
-    - Timeout after reasonable period (5 minutes)
+   provide security). The `yup-oauth2` library manages token persistence.
+5. **Redirect URI Security**: The `yup-oauth2` library's HTTP server for OAuth callback:
+    - Binds only to `localhost` (127.0.0.1)
+    - Shuts down immediately after receiving callback
+    - Has built-in timeout handling
 
 ### First-Time Setup Flow
 
 Expected user experience:
 
 ```bash
+# Step 1: Set up OAuth credentials in Google Cloud Console
+# (Users follow detailed instructions in SETUP.md)
+# Download the client_secret_*.json file
+
+# Step 2: Initialize the tiller directory
+$ tiller init \
+    --sheet-url "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID" \
+    --api-key ~/Downloads/client_secret_*.json
+
+Successfully created the tiller directory and config
+
+# Step 3: Authenticate with Google
 $ tiller auth
-Setting up Google Sheets authentication...
+Opening browser for authorization...
 
-Step 1: Ensure you have OAuth credentials
-  - Visit https://console.cloud.google.com/
-  - Create OAuth 2.0 Desktop Application credentials
-  - Download credentials and save to: /Users/you/tiller/.secrets/api_key.json
+If browser doesn't open automatically, visit:
+https://accounts.google.com/o/oauth2/auth?client_id=...
 
-Step 2: Authorize tiller to access your Google Sheets
-  Opening browser for authorization...
-
-  If browser doesn't open automatically, visit:
-  https://accounts.google.com/o/oauth2/auth?client_id=...
-
-  Waiting for authorization...
+Waiting for authorization...
 
 ✓ Authorization successful!
 ✓ Tokens saved to: /Users/you/tiller/.secrets/token.json
 
+# Step 4: Verify authentication
 $ tiller auth verify
 ✓ Authentication verified successfully
+✓ Token is valid
   Spreadsheet: Tiller Foundation Template
   Access: Read/Write
+
+# Now ready to sync!
+$ tiller sync down
 ```
 
 ## Syncing Behavior
@@ -435,7 +495,7 @@ During the `tiller sync down` call, the following happens.
 - If more than `backup_copies` of the SQLite database exist, the extras are deleted.
 - Three tabs from the `sheet_url`, *Transactions*, *Categories*, and *AutoCat*
 - These are held in memory for further processing but also written out to
-  `$TILLER_HOME/.backup/download.2025-11-09-001.json`.
+  `$TILLER_HOME/.backups/download.2025-11-09-001.json`.
 - If there are more than `backup_copies` of `download.*.json` files, the oldest are deleted.
 - Each of three tables in tiller.sqlite is upserted with the downloaded values.
     - Rows will be added to the database for new rows found in the sheets.
