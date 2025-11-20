@@ -1,7 +1,12 @@
 mod files;
-pub mod oauth;
-pub mod sheets_client;
+mod oauth;
 
-// Re-export commonly used types
-pub use oauth::{refresh_token_if_needed, run_oauth_flow};
-pub use sheets_client::{create_sheets_client, verify_client};
+// OAuth scopes required for Sheets API access
+// Note: drive.readonly is required because google_sheets4 crate uses it as the default scope
+// for API calls like spreadsheets().get(). We also include spreadsheets for full read/write access.
+const OAUTH_SCOPES: &[&str] = &[
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive.readonly",
+];
+
+pub(crate) use oauth::TokenProvider;

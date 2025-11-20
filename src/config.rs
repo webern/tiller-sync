@@ -14,7 +14,7 @@ const APP_NAME: &str = "tiller";
 const CONFIG_VERSION: u8 = 1;
 const BACKUP_COPIES: u32 = 5;
 const SECRETS: &str = ".secrets";
-const API_KEY_JSON: &str = "api_key.json";
+const CLIENT_SECRET_JSON: &str = "client_secret.json";
 const TOKEN_JSON: &str = "token.json";
 const CONFIG_JSON: &str = "config.json";
 const TILLER_SQLITE: &str = "tiller.sqlite";
@@ -36,18 +36,23 @@ pub struct Config {
 impl Config {
     /// Creates the data directory, its subdirectories and:
     /// - Creates an initial `config.json` file using `sheet_url` along with default settings
-    /// - Moves `api_file` into its default location in the data dir.
+    /// - Moves `secret_file` into its default location in the data dir.
     ///
     /// # Arguments
     /// - `dir` - The directory that will be the root of data directory, e.g. `$HOME/tiller`
-    /// - `api_file` - The downloaded json needed to start the Google OAuth workflow. This will be
-    ///   moved from the `api_file` path to its default location and name in the data directory.
+    /// - `secret_file` - The downloaded OAuth 2.0 client credentials JSON needed to start the Google
+    ///   OAuth workflow. This will be moved from the `secret_file` path to its default location and
+    ///   name in the data directory.
     /// - `sheet_url` - The URL of the Google Sheet where the Tiller financial data is stored.
     ///   e.g.https://docs.google.com/spreadsheets/d/1a7Km9FxQwRbPt82JvN4LzYpH5OcGnWsT6iDuE3VhMjX
     ///
     /// # Errors
     /// - Returns an error if any file operations fail.
-    pub async fn create(dir: impl Into<PathBuf>, api_file: &Path, sheet_url: &str) -> Result<Self> {
+    pub async fn create(
+        dir: impl Into<PathBuf>,
+        secret_file: &Path,
+        sheet_url: &str,
+    ) -> Result<Self> {
         // Create the directory if it does not exist
         let maybe_relative = dir.into();
         make_dir(&maybe_relative)
@@ -68,9 +73,9 @@ impl Config {
         let secrets_dir = root.join(".secrets");
         make_dir(&secrets_dir).await?;
 
-        // Move the Google OAuth API Key file to its default location in the data dir
-        let api_destination = secrets_dir.join(API_KEY_JSON);
-        utils::rename(api_file, api_destination).await?;
+        // Move the Google OAuth client credentials file to its default location in the data dir
+        let secret_destination = secrets_dir.join(CLIENT_SECRET_JSON);
+        utils::rename(secret_file, secret_destination).await?;
         let config_path = root.join(CONFIG_JSON);
 
         // Create and save an initial ConfigFile in the datastore
@@ -79,7 +84,7 @@ impl Config {
             config_version: CONFIG_VERSION,
             sheet_url: sheet_url.to_string(),
             backup_copies: BACKUP_COPIES,
-            api_key_path: None,
+            client_secret_path: None,
             token_path: None,
         };
         config_file.save(&config_path).await?;
@@ -161,9 +166,9 @@ impl Config {
         &self.config_file.sheet_url
     }
 
-    /// Returns the stored `api_key_path` if it is absolute, otherwise resolves the relative path.
-    pub fn api_key_path(&self) -> PathBuf {
-        self.resolve_secrets_file_path(self.config_file.api_key_path())
+    /// Returns the stored `client_secret_path` if it is absolute, otherwise resolves the relative path.
+    pub fn client_secret_path(&self) -> PathBuf {
+        self.resolve_secrets_file_path(self.config_file.client_secret_path())
     }
 
     /// Returns the stored `token_path` if it is absolute, otherwise resolves the relative path.
@@ -195,7 +200,7 @@ async fn make_dir(p: &Path) -> Result<()> {
 ///   "config_version": "v0.1.0",
 ///   "sheet_url": "https://docs.google.com/spreadsheets/d/7KpXm2RfZwNJgs84QhVYno5DU6iM9Wlr3bCzAv1txRpL",
 ///   "backup_copies": 5,
-///   "api_key_path": ".secrets/api_key.json",
+///   "client_secret_path": ".secrets/client_secret.json",
 ///   "token_path": ".secrets/token.json"
 /// }
 /// ```
@@ -213,10 +218,10 @@ struct ConfigFile {
     /// Number of backup copies to keep
     backup_copies: u32,
 
-    /// Path to the Google API key file (optional, relative to config.json or absolute)
-    /// Defaults to $TILLER_HOME/.secrets/api_key.json if not specified
+    /// Path to the OAuth 2.0 client credentials file (optional, relative to config.json or absolute)
+    /// Defaults to $TILLER_HOME/.secrets/client_secret.json if not specified
     #[serde(skip_serializing_if = "Option::is_none")]
-    api_key_path: Option<PathBuf>,
+    client_secret_path: Option<PathBuf>,
 
     /// Path to the OAuth token file (optional, relative to config.json or absolute)
     /// Defaults to $TILLER_HOME/.secrets/token.json if not specified
@@ -231,7 +236,7 @@ impl Default for ConfigFile {
             config_version: CONFIG_VERSION,
             sheet_url: String::new(),
             backup_copies: 5,
-            api_key_path: None,
+            client_secret_path: None,
             token_path: None,
         }
     }
@@ -285,7 +290,7 @@ impl ConfigFile {
     pub fn new(
         sheet_url: String,
         backup_copies: u32,
-        api_key_path: Option<PathBuf>,
+        client_secret_path: Option<PathBuf>,
         token_path: Option<PathBuf>,
     ) -> Self {
         Self {
@@ -293,19 +298,19 @@ impl ConfigFile {
             config_version: CONFIG_VERSION,
             sheet_url,
             backup_copies,
-            api_key_path,
+            client_secret_path,
             token_path,
         }
     }
 
-    /// Gets the API key path.
+    /// Gets the client secret path.
     ///
     /// If the path is relative, it should be interpreted as relative to the config.json file.
-    /// If None, defaults to $TILLER_HOME/.secrets/api_key.json
-    pub fn api_key_path(&self) -> PathBuf {
-        self.api_key_path
+    /// If None, defaults to $TILLER_HOME/.secrets/client_secret.json
+    pub fn client_secret_path(&self) -> PathBuf {
+        self.client_secret_path
             .clone()
-            .unwrap_or_else(|| PathBuf::from(SECRETS).join(API_KEY_JSON))
+            .unwrap_or_else(|| PathBuf::from(SECRETS).join(CLIENT_SECRET_JSON))
     }
 
     /// Gets the token path.
@@ -331,15 +336,15 @@ mod tests {
         use tempfile::TempDir;
         let dir = TempDir::new().unwrap();
         let home_dir = dir.path().join("tiller_home");
-        let api_key_source_file = dir.path().join("x.txt");
-        let api_key_content = "12345";
+        let secret_source_file = dir.path().join("x.txt");
+        let secret_content = "12345";
         let sheet_url = "https://example.com/foo/bar123";
-        utils::write(&api_key_source_file, api_key_content)
+        utils::write(&secret_source_file, secret_content)
             .await
             .unwrap();
 
         // Run the function under test:
-        let config = Config::create(&home_dir, &api_key_source_file, &sheet_url)
+        let config = Config::create(&home_dir, &secret_source_file, &sheet_url)
             .await
             .unwrap();
 
@@ -347,8 +352,8 @@ mod tests {
         assert_eq!(sheet_url, config.sheet_url());
 
         // Check for some files in the directory
-        let found_api_key_content = utils::read(&config.api_key_path()).await.unwrap();
-        assert_eq!(api_key_content, found_api_key_content);
+        let found_secret_content = utils::read(&config.client_secret_path()).await.unwrap();
+        assert_eq!(secret_content, found_secret_content);
 
         assert!(config.backups().is_dir());
         assert!(config.secrets().is_dir());
@@ -369,7 +374,7 @@ mod tests {
         let config = ConfigFile::new(
             "https://docs.google.com/spreadsheets/d/test".to_string(),
             10,
-            Some(PathBuf::from("custom/api_key.json")),
+            Some(PathBuf::from("custom/client_secret.json")),
             Some(PathBuf::from("custom/token.json")),
         );
 
@@ -386,8 +391,8 @@ mod tests {
         assert_eq!(config.sheet_url, "");
         assert_eq!(config.backup_copies, 5);
         assert_eq!(
-            config.api_key_path(),
-            PathBuf::from(SECRETS).join(API_KEY_JSON)
+            config.client_secret_path(),
+            PathBuf::from(SECRETS).join(CLIENT_SECRET_JSON)
         );
         assert_eq!(config.token_path(), PathBuf::from(SECRETS).join(TOKEN_JSON));
     }
@@ -436,8 +441,8 @@ mod tests {
         );
         assert_eq!(config.backup_copies, 3);
         assert_eq!(
-            config.api_key_path(),
-            PathBuf::from(SECRETS).join(API_KEY_JSON)
+            config.client_secret_path(),
+            PathBuf::from(SECRETS).join(CLIENT_SECRET_JSON)
         );
         assert_eq!(config.token_path(), PathBuf::from(SECRETS).join(TOKEN_JSON));
     }
@@ -472,7 +477,7 @@ mod tests {
         );
 
         let json = serde_json::to_string(&config).unwrap();
-        assert!(!json.contains("api_key_path"));
+        assert!(!json.contains("client_secret_path"));
         assert!(!json.contains("token_path"));
     }
 

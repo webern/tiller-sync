@@ -108,17 +108,17 @@ pub struct InitArgs {
     #[arg(long)]
     sheet_url: String,
 
-    /// The path to your downloaded OAuth API credentials. This file will be copied to the default
-    /// secrets location in the main data directory.
+    /// The path to your downloaded OAuth 2.0 client credentials. This file will be copied to the
+    /// default secrets location in the main data directory.
     #[arg(long)]
-    api_key: PathBuf,
+    client_secret: PathBuf,
 }
 
 impl InitArgs {
-    pub fn new(sheet_url: impl Into<String>, api_key: impl Into<PathBuf>) -> Self {
+    pub fn new(sheet_url: impl Into<String>, secret: impl Into<PathBuf>) -> Self {
         Self {
             sheet_url: sheet_url.into(),
-            api_key: api_key.into(),
+            client_secret: secret.into(),
         }
     }
 
@@ -126,8 +126,8 @@ impl InitArgs {
         &self.sheet_url
     }
 
-    pub fn api_key(&self) -> &Path {
-        &self.api_key
+    pub fn client_secret(&self) -> &Path {
+        &self.client_secret
     }
 }
 
@@ -166,18 +166,18 @@ pub struct SyncArgs {
     /// The direction to sync: "up" or "down"
     direction: UpDown,
 
-    /// The path to the Google API Key file, defaults to $TILLER_HOME/.secrets/api_key.json
-    api_key: Option<PathBuf>,
+    /// The path to the OAuth 2.0 client credentials file, defaults to $TILLER_HOME/.secrets/client_secret.json
+    client_secret: Option<PathBuf>,
 
     /// The path to the Google OAuth token file, defaults to $TILLER_HOME/.secrets/token.json
     oath_token: Option<PathBuf>,
 }
 
 impl SyncArgs {
-    pub fn new(direction: UpDown, api_key: Option<PathBuf>, oath_token: Option<PathBuf>) -> Self {
+    pub fn new(direction: UpDown, secret: Option<PathBuf>, oath_token: Option<PathBuf>) -> Self {
         Self {
             direction,
-            api_key,
+            client_secret: secret,
             oath_token,
         }
     }
@@ -186,8 +186,8 @@ impl SyncArgs {
         self.direction
     }
 
-    pub fn api_key(&self) -> Option<&PathBuf> {
-        self.api_key.as_ref()
+    pub fn client_secret(&self) -> Option<&PathBuf> {
+        self.client_secret.as_ref()
     }
 
     pub fn oath_token(&self) -> Option<&PathBuf> {

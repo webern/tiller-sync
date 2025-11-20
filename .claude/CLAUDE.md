@@ -63,3 +63,24 @@ add a line like the following below:
 - @../docs/ai/CHANGELOG_INSTRUCTIONS.md: Instructions for managing CHANGELOG.md following Keep a
   Changelog specification
 - @../docs/ai/MARKDOWN.md: Instructions for formatting Markdown
+
+## Rust Instructions
+
+When writing or editing Rust code, always run the following commands before you report that you are
+done:
+
+- Run `cargo fmt`
+- Run `cargo clippy --all-features -- -D warnings` and fix all problems
+
+## Prohibited Dependencies
+
+**NEVER add the following crates to this project:**
+
+- `yup-oauth2` - We implement OAuth manually using the `oauth2` crate for full control over the user
+  authentication flow
+- `google-sheets4` - This crate is tightly coupled to `yup-oauth2` and lacks the control we need over
+  the OAuth interaction
+
+**Rationale:** These libraries do not provide sufficient control over when and how the OAuth browser
+interaction occurs. We need explicit control to ensure `tiller auth` is the only command that initiates
+user authentication workflows, while other commands remain non-interactive and scriptable.
