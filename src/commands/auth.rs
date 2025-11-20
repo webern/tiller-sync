@@ -6,7 +6,7 @@
 
 use crate::api::TokenProvider;
 use crate::{Config, Result};
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use log::info;
 
 /// Handles the `tiller auth` command - runs the OAuth consent flow
@@ -61,43 +61,4 @@ pub async fn auth_verify(config: &Config) -> Result<()> {
         .context("Unable to refresh the token")?;
     info!("Your OAuth token is valid!");
     Ok(())
-}
-
-/// Extracts the spreadsheet ID from a Google Sheets URL
-///
-/// # Arguments
-/// * `url` - The Google Sheets URL (e.g., "https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/...")
-///
-/// # Returns
-/// The spreadsheet ID or an error if the URL format is invalid
-fn _extract_spreadsheet_id(url: &str) -> Result<&str> {
-    // URL format: https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/...
-    let parts: Vec<&str> = url.split('/').collect();
-    for (i, part) in parts.iter().enumerate() {
-        if *part == "d" && i + 1 < parts.len() {
-            return Ok(parts[i + 1]);
-        }
-    }
-    Err(anyhow!(
-        "Invalid Google Sheets URL format. Expected: https://docs.google.com/spreadsheets/d/SPREADSHEET_ID"
-    ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_extract_spreadsheet_id() {
-        let url = "https://docs.google.com/spreadsheets/d/7KpXm2RfZwNJgs84QhVYno5DU6iM9Wlr3bCzAv1txRpL/edit";
-        let id = _extract_spreadsheet_id(url).unwrap();
-        assert_eq!(id, "7KpXm2RfZwNJgs84QhVYno5DU6iM9Wlr3bCzAv1txRpL");
-
-        let url2 = "https://docs.google.com/spreadsheets/d/ABC123";
-        let id2 = _extract_spreadsheet_id(url2).unwrap();
-        assert_eq!(id2, "ABC123");
-
-        let invalid = "https://example.com/invalid";
-        assert!(_extract_spreadsheet_id(invalid).is_err());
-    }
 }

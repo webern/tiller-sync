@@ -11,6 +11,7 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 
+/// This redirect needs to be present in the OAuth credential file, or else OAuth will not work.
 const REDIRECT: &str = "http://localhost";
 
 /// Represents a file that we want to `Serialize`, `Deserialize`, and read from memory in-between
@@ -119,6 +120,8 @@ impl SecretFile {
             .context("Unable to read ClientSecretFile")
     }
 
+    /// Get the redirect URI
+    // TODO: remove if it is not being used.
     pub(crate) fn _redirect_uri(&self) -> &str {
         self.installed.redirect_uris._value()
     }
@@ -264,7 +267,7 @@ impl TokenFile {
     }
 
     /// Check if the token is expired or will expire soon (within 5 minutes)
-    pub(super) fn _is_expired(&self) -> bool {
+    pub(super) fn is_expired(&self) -> bool {
         let now = Utc::now();
         let buffer = chrono::Duration::minutes(5);
         self.expires_at <= now + buffer
