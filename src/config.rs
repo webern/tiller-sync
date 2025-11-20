@@ -31,6 +31,7 @@ pub struct Config {
     config_path: PathBuf,
     config_file: ConfigFile,
     db: PathBuf,
+    spreadsheet_id: String,
 }
 
 impl Config {
@@ -92,6 +93,11 @@ impl Config {
         // Initialize the path to the SQLite database (which doesn't exist yet)
         let db = root.join(TILLER_SQLITE);
 
+        // Extract the spreadsheet ID from the URL
+        let spreadsheet_id = extract_spreadsheet_id(sheet_url)
+            .context("Failed to extract spreadsheet ID from sheet URL")?
+            .to_string();
+
         // Return a new `Config` object that represents a data directory that is ready to use
         Ok(Self {
             root,
@@ -100,9 +106,11 @@ impl Config {
             config_path,
             config_file,
             db,
+            spreadsheet_id,
         })
     }
 
+    // TODO: This function's behavior is a bit ambiguous and questionable now that we have `create`.
     /// This will
     /// - create the `tiller_home` directory, if it does not exist, and canonicalize it.
     /// - Load `config.json`, or create it if it does not exist.
@@ -129,6 +137,11 @@ impl Config {
                 config
             }
         };
+        // Extract the spreadsheet ID from the URL
+        let spreadsheet_id = extract_spreadsheet_id(&config_file.sheet_url)
+            .context("Failed to extract spreadsheet ID from sheet URL")?
+            .to_string();
+
         let config = Self {
             root: root.clone(),
             backups: root.join(".backups"),
@@ -136,6 +149,7 @@ impl Config {
             config_path,
             config_file,
             db: root.join("tiller.sqlite"),
+            spreadsheet_id,
         };
         make_dir(&config.backups).await?;
         make_dir(&config.secrets).await?;
@@ -164,6 +178,10 @@ impl Config {
 
     pub fn sheet_url(&self) -> &str {
         &self.config_file.sheet_url
+    }
+
+    pub fn spreadsheet_id(&self) -> &str {
+        &self.spreadsheet_id
     }
 
     /// Returns the stored `client_secret_path` if it is absolute, otherwise resolves the relative path.
@@ -324,6 +342,41 @@ impl ConfigFile {
     }
 }
 
+/// Extracts the spreadsheet ID from a Google Sheets URL
+///
+/// # Arguments
+/// * `url` - The Google Sheets URL (e.g., "https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/...")
+///
+/// # Returns
+/// The spreadsheet ID or an error if the URL format is invalid. Returns an empty string if the URL is empty.
+fn extract_spreadsheet_id(url: &str) -> Result<&str> {
+    // Handle empty URL case
+    if url.is_empty() {
+        return Ok(url);
+    }
+
+    // URL format: https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/...
+    // or: https://docs.google.com/spreadsheets/d/SPREADSHEET_ID?foo=bar
+    let parts: Vec<&str> = url.split('/').collect();
+    for (i, part) in parts.iter().enumerate() {
+        if *part == "d" && i + 1 < parts.len() {
+            // Extract the ID and remove any query parameters or fragments
+            let id_part = parts[i + 1];
+            let id = id_part
+                .split('?')
+                .next()
+                .unwrap_or(id_part)
+                .split('#')
+                .next()
+                .unwrap_or(id_part);
+            return Ok(id);
+        }
+    }
+    Err(anyhow::anyhow!(
+        "Invalid Google Sheets URL format. Expected: https://docs.google.com/spreadsheets/d/SPREADSHEET_ID"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,7 +391,7 @@ mod tests {
         let home_dir = dir.path().join("tiller_home");
         let secret_source_file = dir.path().join("x.txt");
         let secret_content = "12345";
-        let sheet_url = "https://example.com/foo/bar123";
+        let sheet_url = "https://docs.google.com/spreadsheets/d/7KpXm2RfZwNJgs84QhVYno5DU6iM9Wlr3bCzAv1txRpL/edit";
         utils::write(&secret_source_file, secret_content)
             .await
             .unwrap();
@@ -350,6 +403,10 @@ mod tests {
 
         // Check some values on the config object
         assert_eq!(sheet_url, config.sheet_url());
+        assert_eq!(
+            "7KpXm2RfZwNJgs84QhVYno5DU6iM9Wlr3bCzAv1txRpL",
+            config.spreadsheet_id()
+        );
 
         // Check for some files in the directory
         let found_secret_content = utils::read(&config.client_secret_path()).await.unwrap();
@@ -497,5 +554,43 @@ mod tests {
         let read = ConfigFile::load(&path).await.unwrap();
 
         assert_eq!(original, read);
+    }
+
+    #[test]
+    fn test_extract_spreadsheet_id_1() {
+        let url = "https://docs.google.com/spreadsheets/d/7KpXm2RfZwNJgs84QhVYno5DU6iM9Wlr3bCzAv1txRpL/edit";
+        let id = extract_spreadsheet_id(url).unwrap();
+        assert_eq!(id, "7KpXm2RfZwNJgs84QhVYno5DU6iM9Wlr3bCzAv1txRpL");
+
+        let url2 = "https://docs.google.com/spreadsheets/d/ABC123";
+        let id2 = extract_spreadsheet_id(url2).unwrap();
+        assert_eq!(id2, "ABC123");
+
+        let invalid = "https://example.com/invalid";
+        assert!(extract_spreadsheet_id(invalid).is_err());
+
+        // Empty URL should return empty string
+        let empty = "";
+        let id_empty = extract_spreadsheet_id(empty).unwrap();
+        assert_eq!(id_empty, "");
+    }
+
+    #[test]
+    fn test_extract_spreadsheet_id_2() {
+        let url = "https://docs.google.com/spreadsheets/d/7KpXm2RfZwNJgs84QhVYno5DU6iM9Wlr3bCzAv1txRpL?foo=bar";
+        let id = extract_spreadsheet_id(url).unwrap();
+        assert_eq!(id, "7KpXm2RfZwNJgs84QhVYno5DU6iM9Wlr3bCzAv1txRpL");
+
+        let url2 = "https://docs.google.com/spreadsheets/d/ABC123";
+        let id2 = extract_spreadsheet_id(url2).unwrap();
+        assert_eq!(id2, "ABC123");
+
+        let invalid = "https://example.com/invalid";
+        assert!(extract_spreadsheet_id(invalid).is_err());
+
+        // Empty URL should return empty string
+        let empty = "";
+        let id_empty = extract_spreadsheet_id(empty).unwrap();
+        assert_eq!(id_empty, "");
     }
 }

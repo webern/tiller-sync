@@ -190,9 +190,9 @@ impl TokenProvider {
     /// - If the token refresh is successful, updates the state of `self` with it, and saves it to
     ///   our token file path.
     /// - Returns the `token` for the sheets client to use.
-    pub(super) async fn _token_with_refresh(&mut self) -> Result<&str> {
+    pub(super) async fn token_with_refresh(&mut self) -> Result<&str> {
         // Check if token needs refresh
-        if !self.token.data()._is_expired() {
+        if !self.token.data().is_expired() {
             return Ok(self.token.data().access_token());
         }
 

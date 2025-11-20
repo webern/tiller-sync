@@ -2,7 +2,7 @@ use clap::Parser;
 use env_logger::Builder;
 use log::{debug, error, trace, LevelFilter};
 use std::process::ExitCode;
-use tiller_sync::args::{Args, Command};
+use tiller_sync::args::{Args, Command, UpDown};
 use tiller_sync::commands;
 use tiller_sync::{Config, Result};
 
@@ -45,10 +45,10 @@ pub async fn main_inner(args: Args) -> Result<()> {
                 commands::auth(&config).await
             }
         }
-        Command::Sync(_sync_args) => {
-            // TODO: Implement sync command
-            unimplemented!("Sync command not yet implemented");
-        }
+        Command::Sync(sync_args) => match sync_args.direction() {
+            UpDown::Up => unimplemented!("'sync up' command not yet implemented"),
+            UpDown::Down => commands::sync_down(config).await,
+        },
     }
 }
 
