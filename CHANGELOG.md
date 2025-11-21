@@ -14,6 +14,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Add a config file struct, lib.rs, and args [#4]
 - Implement `tiller init` [#9]
 - Implement OAuth [#5], [#6], [#7], [#8], [#10]
+- Implement Sheets interactions [#11]
 
 <!-- @formatter:off -->
 
@@ -30,5 +31,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#8]: https://github.com/webern/tiller-sync/pull/8
 [#9]: https://github.com/webern/tiller-sync/pull/9
 [#10]: https://github.com/webern/tiller-sync/pull/10
+[#11]: https://github.com/webern/tiller-sync/pull/11
 
 <!-- Issues -->
