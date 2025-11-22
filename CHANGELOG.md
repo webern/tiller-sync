@@ -9,9 +9,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Initial project structure
-- Add design documentation [#3]
-- Add a config file struct, lib.rs, and args [#4]
+- Initial project structure, documentation and design [#3], [#4]
 - Implement `tiller init` [#9]
 - Implement OAuth [#5], [#6], [#7], [#8], [#10]
 - Implement Sheets interactions [#11]
@@ -20,7 +18,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 <!-- Tags -->
 
-[Unreleased]: https://github.com/webern/tiller/compare/ed24ca5...HEAD
+[Unreleased]: https://github.com/webern/tiller/compare/9c4b07a...HEAD
 
 <!-- Pull Requests -->
 [#3]: https://github.com/webern/tiller-sync/pull/3
