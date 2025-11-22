@@ -3,8 +3,14 @@ name: rust
 on:
   push:
     branches: [ "main" ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   pull_request:
     branches: [ "main" ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
 
 env:
   CARGO_TERM_COLOR: always
@@ -38,7 +44,7 @@ jobs:
     - name: run clippy
       run: cargo clippy -- -D warnings
 
-  lint:
+  fmt:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
