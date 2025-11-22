@@ -1,14 +1,18 @@
 # Tiller Sync
 
+⚠️: Not ready yet!
+
 A program for syncing data between a [tiller] Google Sheet and a local SQLite database.
+With it you can download your transactions, make edits to them locally in SQLite, then sync back the
+changes (this part is hard, TBD!)
 
 ## Table of Contents
 
 - [Overview](#overview)
 - [Installation](#installation)
 - [Setup](#setup)
-  - [Prerequisites](#prerequisites)
-  - [Initial Setup](#initial-setup)
+    - [Prerequisites](#prerequisites)
+    - [Initial Setup](#initial-setup)
 - [Usage](#usage)
 - [Troubleshooting](#troubleshooting)
 
@@ -46,19 +50,24 @@ Setting up Tiller Sync requires a few steps. Please follow them in order:
 
 #### 1. Set up Google Cloud Console
 
-First, you need to create OAuth credentials in Google Cloud Console. This process is somewhat involved but only needs to be done once.
+First, you need to create OAuth credentials in Google Cloud Console. This process is somewhat
+involved but only needs to be done once.
 
 **Follow the detailed instructions in [SETUP.md](docs/SETUP.md)** to:
+
 - Create a Google Cloud project
 - Enable the Google Sheets API
 - Configure OAuth consent screen
 - Create and download OAuth credentials
 
-Once you've completed those steps and have your downloaded `client_secret_*.json` file, return here to continue.
+Once you've completed those steps and have your downloaded `client_secret_*.json` file, return here
+to continue.
 
 #### 2. Initialize Tiller
 
-After completing the Google Cloud Console setup, initialize your Tiller directory with the `tiller init` command. You'll need:
+After completing the Google Cloud Console setup, initialize your Tiller directory with the
+`tiller init` command. You'll need:
+
 - The path to your downloaded OAuth credentials file (from step 1)
 - The URL of your Tiller Google Sheet
 
@@ -76,6 +85,7 @@ tiller init \
 ```
 
 This command will:
+
 - Create the data directory structure
 - Copy your OAuth credentials to `.secrets/client_secret.json`
 - Create an initial `config.json` with your sheet URL
@@ -89,30 +99,35 @@ tiller auth
 ```
 
 The command will:
+
 - Automatically open your web browser to Google's authorization page
 - If the browser doesn't open automatically, copy the URL displayed in the terminal
 
 In the browser:
+
 - Select the Google account you use for Tiller
 - You may see a warning that "Google hasn't verified this app"
-  - Click **"Advanced"**
-  - Click **"Go to Tiller Sync (unsafe)"**
-  - This warning appears because you created the OAuth credentials yourself - your data is safe
+    - Click **"Advanced"**
+    - Click **"Go to Tiller Sync (unsafe)"**
+    - This warning appears because you created the OAuth credentials yourself - your data is safe
 - Review the permissions requested
 - Click **"Allow"**
 
 After clicking "Allow", you should see a success message in your browser and in your terminal:
+
 ```
 ✓ Authorization successful!
 ✓ Tokens saved to: /Users/you/tiller/.secrets/token.json
 ```
 
 Verify your authentication:
+
 ```bash
 tiller auth verify
 ```
 
 You should see:
+
 ```
 ✓ Authentication verified successfully
   Spreadsheet: Tiller Foundation Template
@@ -213,7 +228,8 @@ Ensure you've placed `client_secret.json` in the correct location:
 ls -la ~/tiller/.secrets/client_secret.json
 ```
 
-If the file is missing, you'll need to download the OAuth credentials again from Google Cloud Console.
+If the file is missing, you'll need to download the OAuth credentials again from Google Cloud
+Console.
 
 ### "Google hasn't verified this app" warning
 
