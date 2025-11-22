@@ -12,9 +12,9 @@ mod tiller;
 use crate::api::sheet::GoogleSheet;
 use crate::api::sheet_test_client::TestSheet;
 use crate::api::tiller::TillerImpl;
-use crate::{Amount, Config, Result};
-pub(crate) use oauth::TokenProvider;
-use serde::{Deserialize, Serialize};
+use crate::model::TillerData;
+use crate::{Config, Result};
+pub(super) use oauth::TokenProvider;
 use std::env::VarError;
 
 // OAuth scopes required for Sheets API access
@@ -83,68 +83,4 @@ pub trait Sheet: Send {
 pub trait Tiller {
     /// Get the data from the Tiller Google sheet.
     async fn get_data(&mut self) -> Result<TillerData>;
-}
-
-/// Represents all the sheets of interest from a tiller Google sheet.
-#[derive(Default, Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct TillerData {
-    /// Rows of data from the Transactions sheet.
-    transactions: Vec<Transaction>,
-    /// Rows of data from the Categories sheet.
-    categories: Vec<Category>,
-    /// Rows of data from the AutoCat sheet.
-    auto_cats: Vec<AutoCat>,
-}
-
-/// Represents a single row from the Transactions sheet.
-#[derive(Default, Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct Transaction {
-    transaction_id: String,
-    date: String,
-    description: String,
-    amount: Amount,
-    account: String,
-    account_number: String,
-    institution: String,
-    month: String,
-    week: String,
-    full_description: String,
-    account_id: String,
-    check_number: String,
-    date_added: String,
-    merchant_name: String,
-    category_hint: String,
-    category: String,
-    note: String,
-    tags: String,
-}
-
-/// Represents a single row from the Category sheet.
-#[derive(Default, Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct Category {
-    category: String,
-    group: String,
-    #[serde(rename = "type")]
-    _type: String,
-    hide_from_reports: String,
-}
-
-/// Represents a single row from the AutoCat sheet.
-#[derive(Default, Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct AutoCat {
-    category: String,
-    description_contains: Option<String>,
-    account_contains: Option<String>,
-    institution_contains: Option<String>,
-    amount_min: Option<Amount>,
-    amount_max: Option<Amount>,
-    amount_equals: Option<Amount>,
-    description_equals: Option<String>,
-    description_full: Option<String>,
-    full_description_contains: Option<String>,
-    amount_contains: Option<String>,
 }

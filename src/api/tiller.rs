@@ -1,8 +1,8 @@
 //! Implements the `Tiller` trait for interacting with Google sheet data from a tiller sheet.
 
-use crate::api::{AutoCat, Category, Sheet, Tiller, TillerData, Transaction};
-use crate::api::{AUTO_CAT, CATEGORIES, TRANSACTIONS};
-use crate::{Amount, Result};
+use crate::api::{Sheet, Tiller, AUTO_CAT, CATEGORIES, TRANSACTIONS};
+use crate::model::{Amount, AutoCat, Category, TillerData, Transaction};
+use crate::Result;
 use anyhow::Context;
 use std::collections::HashMap;
 use std::str::FromStr;

@@ -50,7 +50,7 @@ const DEFAULT_FORMAT: AmountFormat = AmountFormat {
 ///
 /// Parsing with dollar sign:
 /// ```
-/// # use tiller_sync::Amount;
+/// # use tiller_sync::model::Amount;
 /// # use std::str::FromStr;
 /// let amount = Amount::from_str("-$50.00").unwrap();
 /// assert_eq!(amount.to_string(), "-$50.00");
@@ -58,7 +58,7 @@ const DEFAULT_FORMAT: AmountFormat = AmountFormat {
 ///
 /// Parsing without dollar sign:
 /// ```
-/// # use tiller_sync::Amount;
+/// # use tiller_sync::model::Amount;
 /// # use std::str::FromStr;
 /// let amount = Amount::from_str("-50.00").unwrap();
 /// assert_ne!(amount.to_string(), "-$50.00");
@@ -67,7 +67,7 @@ const DEFAULT_FORMAT: AmountFormat = AmountFormat {
 ///
 /// Value equivalency, but not absolute equivalency
 /// ```
-/// # use tiller_sync::Amount;
+/// # use tiller_sync::model::Amount;
 /// # use std::str::FromStr;
 /// let a = Amount::from_str("-5000.00").unwrap();
 /// let b = Amount::from_str("-$5,000.00").unwrap();
