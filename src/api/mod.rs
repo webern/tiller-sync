@@ -12,9 +12,9 @@ mod tiller;
 use crate::api::sheet::GoogleSheet;
 use crate::api::sheet_test_client::TestSheet;
 use crate::api::tiller::TillerImpl;
-use crate::{Amount, Config, Result};
-pub(crate) use oauth::TokenProvider;
-use serde::{Deserialize, Serialize};
+use crate::model::TillerData;
+use crate::{Config, Result};
+pub(super) use oauth::TokenProvider;
 use std::env::VarError;
 
 // OAuth scopes required for Sheets API access
@@ -74,6 +74,9 @@ pub trait Sheet: Send {
     /// Get the data from a Google sheet.
     async fn get(&mut self, sheet_name: &str) -> Result<Vec<Vec<String>>>;
 
+    /// Get the formulas from a Google sheet (returns formulas for formula cells, values for non-formula cells).
+    async fn get_formulas(&mut self, sheet_name: &str) -> Result<Vec<Vec<String>>>;
+
     /// Replace the data in a Google sheet.
     // TODO: this function signature might need to change depending on how we plan to merge data.
     async fn _put(&mut self, sheet_name: &str, data: &[Vec<String>]) -> Result<()>;
@@ -85,66 +88,16 @@ pub trait Tiller {
     async fn get_data(&mut self) -> Result<TillerData>;
 }
 
-/// Represents all the sheets of interest from a tiller Google sheet.
-#[derive(Default, Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct TillerData {
-    /// Rows of data from the Transactions sheet.
-    transactions: Vec<Transaction>,
-    /// Rows of data from the Categories sheet.
-    categories: Vec<Category>,
-    /// Rows of data from the AutoCat sheet.
-    auto_cats: Vec<AutoCat>,
-}
-
-/// Represents a single row from the Transactions sheet.
-#[derive(Default, Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct Transaction {
-    transaction_id: String,
-    date: String,
-    description: String,
-    amount: Amount,
-    account: String,
-    account_number: String,
-    institution: String,
-    month: String,
-    week: String,
-    full_description: String,
-    account_id: String,
-    check_number: String,
-    date_added: String,
-    merchant_name: String,
-    category_hint: String,
-    category: String,
-    note: String,
-    tags: String,
-}
-
-/// Represents a single row from the Category sheet.
-#[derive(Default, Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct Category {
-    category: String,
-    group: String,
-    #[serde(rename = "type")]
-    _type: String,
-    hide_from_reports: String,
-}
-
-/// Represents a single row from the AutoCat sheet.
-#[derive(Default, Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct AutoCat {
-    category: String,
-    description_contains: Option<String>,
-    account_contains: Option<String>,
-    institution_contains: Option<String>,
-    amount_min: Option<Amount>,
-    amount_max: Option<Amount>,
-    amount_equals: Option<Amount>,
-    description_equals: Option<String>,
-    description_full: Option<String>,
-    full_description_contains: Option<String>,
-    amount_contains: Option<String>,
+#[tokio::test]
+async fn test_sync_down_behavior() {
+    let client = Box::new(TestSheet::default());
+    let mut tiller = crate::api::tiller(client).await.unwrap();
+    let tiller_data = tiller.get_data().await.unwrap();
+    let tiller_data_serialized = serde_json::to_string_pretty(&tiller_data).unwrap();
+    let tiller_data_deserialized: TillerData =
+        serde_json::from_str(&tiller_data_serialized).unwrap();
+    let tiller_data_serialized_again =
+        serde_json::to_string_pretty(&tiller_data_deserialized).unwrap();
+    assert_eq!(tiller_data, tiller_data_deserialized);
+    assert_eq!(tiller_data_serialized, tiller_data_serialized_again)
 }

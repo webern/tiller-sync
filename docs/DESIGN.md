@@ -346,16 +346,207 @@ During the `tiller sync down` call, the following happens.
 
 ### Up
 
-- If the datastore does not exist, an error is raised suggesting that `down` should be used first.
-- If the SQLite database is empty of transactions, an error is raised suggesting that `down` should
-  be used first.
-- A backup of the SQLite database is created.
-- If more than `backup_copies` of the SQLite database exist, the extras are deleted.
-- Each of the three tables in tiller.sqlite is used to upsert the Google sheet's corresponding tabs.
-    - Rows will be added to the sheets for new rows found in the database.
-    - Rows will be deleted from the sheets when their corresponding rows in the database have been
-      deleted.
-    - Rows will be updated when they match shows in the database.
+The `tiller sync up` command synchronizes local changes from the SQLite database to the Google Sheet.
+This operation requires careful design to prevent data corruption given the constraints of the
+Google Sheets API.
+
+#### Design Constraints
+
+1. **No Optimistic Locking**: The Google Sheets API does not provide built-in mechanisms for
+   conditional updates or optimistic concurrency control
+2. **No Atomic Transactions**: Multiple operations cannot be grouped into an atomic transaction
+3. **Structure Instability**: Users can reorder columns or sort rows at any time
+4. **Concurrent Modifications**: The sheet could be edited during our sync operation
+5. **Range-Based Updates**: The API addresses cells using A1 notation (e.g., "Transactions!A2:Z100")
+
+#### Strategy: Clear and Replace with Verification
+
+Given these constraints, the safest approach is to treat the local SQLite database as the
+authoritative source of truth and completely replace the sheet contents. This strategy eliminates
+dependencies on row/column ordering and provides predictable, repeatable results.
+
+**Algorithm:**
+
+1. **Precondition Checks**
+    - If the datastore does not exist, error with message: "Run 'tiller sync down' first"
+    - If the SQLite database is empty of transactions, error with message: "Run 'tiller sync down'
+      first"
+
+2. **Backup Operations**
+    - Create backup of SQLite database with timestamp (e.g., `tiller.sqlite.2025-11-21-003`)
+    - Delete oldest backups if more than `backup_copies` exist
+
+3. **Download Current Sheet State**
+    - Fetch all three tabs: Transactions, Categories, AutoCat
+    - Save to backup file: `$TILLER_HOME/.backups/upload-snapshot.YYYY-MM-DD-NNN.json`
+    - This serves as a snapshot of what we're about to overwrite
+    - Delete oldest upload snapshots if more than `backup_copies` exist
+
+4. **Conflict Detection (Optional but Recommended)**
+    - Compare downloaded sheet data with most recent `download.*.json` backup
+    - If differences detected, warn user: "Sheet has been modified since last sync down"
+    - Count differences: `N transactions added, M modified, P deleted since last download`
+    - Recommend: "Run 'tiller sync down' first to merge changes, or use --force to overwrite"
+    - If `--force` not provided, abort sync
+
+5. **Build Output Data**
+    - For each tab (Transactions, Categories, AutoCat):
+        - Query all rows from corresponding SQLite table
+        - Build header row with exact column names expected by Tiller
+        - Build data rows in consistent column order
+        - Ensure calculated fields are populated (Month, Week for transactions)
+        - Sort rows by a predictable field (e.g., Date for transactions, then transaction_id)
+
+6. **Execute Batch Clear and Write**
+    - Using `spreadsheets().values_batch_update()` for efficiency:
+        - **Operation 1**: Clear each tab's data range (preserve sheet structure, delete all rows
+          except header)
+            - Transactions: `"Transactions!A2:ZZ"` (everything below header row)
+            - Categories: `"Categories!A2:ZZ"`
+            - AutoCat: `"AutoCat!A2:ZZ"`
+        - **Operation 2**: Write header rows
+            - Transactions: `"Transactions!A1:ZZ1"`
+            - Categories: `"Categories!A1:ZZ1"`
+            - AutoCat: `"AutoCat!A1:ZZ1"`
+        - **Operation 3**: Write all data rows
+            - Transactions: `"Transactions!A2:ZZ"` (dynamic based on row count)
+            - Categories: `"Categories!A2:ZZ"`
+            - AutoCat: `"AutoCat!A2:ZZ"`
+    - Use `ValueInputOption::UserEntered` to allow Sheets to parse dates/numbers/formulas
+
+7. **Verification**
+    - Re-fetch row counts from each tab
+    - Verify counts match what we wrote
+    - Log summary: `"Synced N transactions, M categories, P autocat rules to sheet"`
+
+8. **Error Handling**
+    - If any operation fails, the backup files allow manual recovery
+    - Log all operations to stderr at INFO level
+    - On failure, provide clear message about which backup to restore from
+
+**Implementation with sheets crate:**
+
+```rust
+// Build batch request
+let batch_request = BatchUpdateValuesRequest {
+    data: vec![
+        // Headers
+        ValueRange {
+            range: "Transactions!A1:ZZ1".to_string(),
+            major_dimension: Some(Dimension::Rows),
+            values: vec![transactions_header_row],
+        },
+        ValueRange {
+            range: "Categories!A1:ZZ1".to_string(),
+            major_dimension: Some(Dimension::Rows),
+            values: vec![categories_header_row],
+        },
+        ValueRange {
+            range: "AutoCat!A1:ZZ1".to_string(),
+            major_dimension: Some(Dimension::Rows),
+            values: vec![autocat_header_row],
+        },
+        // Data (after clearing)
+        ValueRange {
+            range: "Transactions!A2:ZZ".to_string(),
+            major_dimension: Some(Dimension::Rows),
+            values: transactions_data,
+        },
+        ValueRange {
+            range: "Categories!A2:ZZ".to_string(),
+            major_dimension: Some(Dimension::Rows),
+            values: categories_data,
+        },
+        ValueRange {
+            range: "AutoCat!A2:ZZ".to_string(),
+            major_dimension: Some(Dimension::Rows),
+            values: autocat_data,
+        },
+    ],
+    value_input_option: Some(ValueInputOption::UserEntered),
+    include_values_in_response: Some(false),
+    ..Default::default()
+};
+
+// Clear existing data first
+let clear_request = BatchClearValuesRequest {
+    ranges: vec![
+        "Transactions!A2:ZZ".to_string(),
+        "Categories!A2:ZZ".to_string(),
+        "AutoCat!A2:ZZ".to_string(),
+    ],
+};
+client.spreadsheets()
+    .values_batch_clear(spreadsheet_id, &clear_request)
+    .await?;
+
+// Write all data
+let response = client.spreadsheets()
+    .values_batch_update(spreadsheet_id, &batch_request)
+    .await?;
+
+// Verify
+log::info!("Updated {} cells across {} rows",
+    response.body.total_updated_cells,
+    response.body.total_updated_rows);
+```
+
+#### Why Not Row-by-Row Reconciliation?
+
+An alternative approach would be to:
+1. Download current sheet state
+2. Build ID-based maps (transaction_id → row)
+3. Compute diffs (rows to add, update, delete)
+4. Apply targeted updates to specific cells
+
+**Problems with this approach:**
+
+- **Row order dependency**: If user sorts the sheet, our row positions become invalid
+- **Race conditions**: Sheet could change between our read and write operations
+- **Complex error recovery**: Partial updates are hard to roll back
+- **API limitations**: No way to update "row with ID X" directly - must use row numbers
+- **Column reordering**: User could drag columns; we'd write to wrong cells
+
+The clear-and-replace strategy is simpler, more robust, and provides predictable behavior.
+
+#### Safety Measures
+
+1. **Always backup before syncing** - Multiple recovery points available
+2. **Conflict detection** - Warn if sheet was modified since last download
+3. **`--force` flag** - Require explicit confirmation to overwrite remote changes
+4. **`--dry-run` flag** - Preview what would be changed without actually syncing
+5. **Consistent column order** - Always write headers explicitly to control column positions
+6. **Verification** - Confirm write succeeded by checking row counts
+7. **Comprehensive logging** - All operations logged to stderr for debugging
+
+#### Future Enhancements
+
+1. **Three-way merge**: Track "last synced state" to detect conflicts in both local and remote
+2. **Timestamp tracking**: Add `last_modified_local` field to detect which rows changed locally
+3. **Selective sync**: Only upload transactions modified since last sync
+4. **Transaction-level conflict resolution**: Merge changes at the row level when possible
+
+#### User Workflow
+
+**Safe workflow** (recommended):
+```bash
+# 1. Download latest changes from sheet
+tiller sync down
+
+# 2. Make local edits in SQLite
+
+# 3. Upload local changes back to sheet
+tiller sync up
+```
+
+**Forcing overwrites** (when local is authoritative):
+```bash
+# Preview changes
+tiller sync up --dry-run
+
+# Force upload despite remote changes
+tiller sync up --force
+```
 
 ### Row IDs
 
