@@ -36,17 +36,20 @@ impl Tiller for TillerImpl {
 /// Fetches transaction data from the Transactions tab
 async fn fetch_transactions(client: &mut (dyn Sheet + Send)) -> Result<Transactions> {
     let values = client.get(TRANSACTIONS).await?;
-    Transactions::new(values)
+    let formulas = client.get_formulas(TRANSACTIONS).await?;
+    Transactions::new(values, formulas)
 }
 
 /// Fetches category data from the Categories tab
 async fn fetch_categories(client: &mut (dyn Sheet + Send)) -> Result<Categories> {
     let values = client.get(CATEGORIES).await?;
-    Categories::new(values)
+    let formulas = client.get_formulas(CATEGORIES).await?;
+    Categories::new(values, formulas)
 }
 
 /// Fetches AutoCat data from the AutoCat tab
 async fn fetch_auto_cats(client: &mut (dyn Sheet + Send)) -> Result<AutoCats> {
     let values = client.get(AUTO_CAT).await?;
-    AutoCats::new(values)
+    let formulas = client.get_formulas(AUTO_CAT).await?;
+    AutoCats::new(values, formulas)
 }

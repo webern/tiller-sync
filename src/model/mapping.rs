@@ -135,14 +135,6 @@ impl FromStr for Header {
     }
 }
 
-pub trait AsHeader {
-    fn _as_header_str(&self) -> &str;
-
-    fn _as_header(&self) -> Header {
-        Header(self._as_header_str().to_string())
-    }
-}
-
 /// Represents a column name in the SQLite database, for example, `account_number`
 #[derive(Default, Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[serde(transparent)]

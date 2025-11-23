@@ -3,11 +3,13 @@ mod amount;
 mod auto_cat;
 mod category;
 mod mapping;
+mod row_col;
 mod transaction;
 
 pub use amount::{Amount, AmountFormat};
 pub use auto_cat::{AutoCat, AutoCats};
 pub use category::{Categories, Category};
+pub(crate) use row_col::RowCol;
 use serde::{Deserialize, Serialize};
 pub use transaction::{Transaction, Transactions};
 

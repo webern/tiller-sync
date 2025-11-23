@@ -74,6 +74,9 @@ pub trait Sheet: Send {
     /// Get the data from a Google sheet.
     async fn get(&mut self, sheet_name: &str) -> Result<Vec<Vec<String>>>;
 
+    /// Get the formulas from a Google sheet (returns formulas for formula cells, values for non-formula cells).
+    async fn get_formulas(&mut self, sheet_name: &str) -> Result<Vec<Vec<String>>>;
+
     /// Replace the data in a Google sheet.
     // TODO: this function signature might need to change depending on how we plan to merge data.
     async fn _put(&mut self, sheet_name: &str, data: &[Vec<String>]) -> Result<()>;
@@ -83,4 +86,18 @@ pub trait Sheet: Send {
 pub trait Tiller {
     /// Get the data from the Tiller Google sheet.
     async fn get_data(&mut self) -> Result<TillerData>;
+}
+
+#[tokio::test]
+async fn test_sync_down_behavior() {
+    let client = Box::new(TestSheet::default());
+    let mut tiller = crate::api::tiller(client).await.unwrap();
+    let tiller_data = tiller.get_data().await.unwrap();
+    let tiller_data_serialized = serde_json::to_string_pretty(&tiller_data).unwrap();
+    let tiller_data_deserialized: TillerData =
+        serde_json::from_str(&tiller_data_serialized).unwrap();
+    let tiller_data_serialized_again =
+        serde_json::to_string_pretty(&tiller_data_deserialized).unwrap();
+    assert_eq!(tiller_data, tiller_data_deserialized);
+    assert_eq!(tiller_data_serialized, tiller_data_serialized_again)
 }

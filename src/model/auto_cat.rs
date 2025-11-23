@@ -1,9 +1,9 @@
-use crate::model::mapping::{AsHeader, Mapping};
-use crate::model::Amount;
+use crate::model::mapping::Mapping;
+use crate::model::{Amount, RowCol};
 use crate::Result;
 use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::str::FromStr;
 
 /// Represents the AutoCat data from an AutoCat sheet, including the header mapping.
@@ -12,10 +12,16 @@ use std::str::FromStr;
 pub struct AutoCats {
     mapping: Mapping,
     data: Vec<AutoCat>,
+    /// Maps (row_index, column_index) -> formula for cells that contain formulas.
+    /// Stored exactly as returned by the Google Sheets API.
+    formulas: BTreeMap<RowCol, String>,
 }
 
 impl AutoCats {
-    pub fn new<S, R>(sheet_data: impl IntoIterator<Item = R>) -> Result<Self>
+    pub fn new<S, R>(
+        sheet_data: impl IntoIterator<Item = R>,
+        formula_data: impl IntoIterator<Item = R>,
+    ) -> Result<Self>
     where
         S: Into<String>,
         R: IntoIterator<Item = S>,
@@ -28,7 +34,16 @@ impl AutoCats {
 
         let len = mapping.len();
 
+        // Convert formula data to Vec<Vec<String>> for comparison
+        let formula_rows: Vec<Vec<String>> = formula_data
+            .into_iter()
+            .map(|row| row.into_iter().map(|s| s.into()).collect())
+            .collect();
+
+        // Detect formulas by comparing values vs formulas
+        let mut formulas = BTreeMap::new();
         let mut auto_cats = Vec::new();
+
         for (row_ix, row) in rows.enumerate() {
             let values: Vec<String> = row.into_iter().map(|s| s.into()).collect();
             if values.is_empty() {
@@ -40,11 +55,25 @@ impl AutoCats {
                     row_ix + 2
                 );
             }
+
+            // Compare with formula row to detect formulas (row_ix+1 because we skipped header)
+            if let Some(formula_row) = formula_rows.get(row_ix + 1) {
+                for (col_ix, value) in values.iter().enumerate() {
+                    if let Some(formula) = formula_row.get(col_ix) {
+                        // If formula differs from value, it's a formula cell
+                        if formula != value {
+                            formulas.insert(RowCol::new(row_ix, col_ix), formula.clone());
+                        }
+                    }
+                }
+            }
+
             auto_cats.push(AutoCat::new_with_sheet_headers(mapping.headers(), values)?);
         }
         Ok(Self {
             mapping,
             data: auto_cats,
+            formulas,
         })
     }
 }
@@ -65,7 +94,7 @@ pub struct AutoCat {
     pub(crate) description_full: String,
     pub(crate) full_description_contains: String,
     pub(crate) amount_contains: String,
-    pub(crate) other_fields: HashMap<String, String>,
+    pub(crate) other_fields: BTreeMap<String, String>,
 }
 
 impl AutoCat {
@@ -161,7 +190,8 @@ impl AutoCatColumn {
     }
 }
 
-impl AsHeader for AutoCatColumn {
+// TODO: perhaps remove this if unused in the future
+impl AutoCatColumn {
     fn _as_header_str(&self) -> &str {
         match self {
             AutoCatColumn::Category => CATEGORY_STR,

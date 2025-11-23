@@ -50,6 +50,24 @@ impl Sheet for GoogleSheet {
         Ok(response.body.values)
     }
 
+    async fn get_formulas(&mut self, sheet_name: &str) -> Result<Vec<Vec<String>>> {
+        self.refresh_client().await?;
+        let range = format!("{sheet_name}!A:ZZ"); // Get all columns
+        let response = self
+            .client
+            .spreadsheets()
+            .values_get(
+                self.config.spreadsheet_id(),
+                &range,
+                DateTimeRenderOption::FormattedString,
+                Dimension::Rows,
+                ValueRenderOption::Formula,
+            )
+            .await
+            .with_context(|| format!("Failed to fetch {sheet_name} sheet formulas"))?;
+        Ok(response.body.values)
+    }
+
     async fn _put(&mut self, _sheet_name: &str, _data: &[Vec<String>]) -> Result<()> {
         self.refresh_client().await?;
         todo!()
