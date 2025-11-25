@@ -455,6 +455,103 @@ CREATE INDEX idx_transactions_description ON transactions (description);
 - `Month` and `Week` fields are automatically calculated by Tiller for reporting/grouping purposes.
   If we add rows, we should calculate and populate them.
 
+## Sync Up Strategy
+
+### Design Constraints
+
+The Google Sheets API has important limitations that affect our sync up design:
+
+1. **No Optimistic Locking**: The Sheets API doesn't provide row-level version numbers or timestamps
+2. **No Atomic Transactions**: We cannot atomically read-then-write across multiple operations
+3. **Row Order Instability**: Rows can be reordered in the UI, making row indices unreliable
+4. **No Native Merge**: The API doesn't provide built-in merge/upsert functionality
+
+### Clear and Replace Approach
+
+Given these constraints, we use a **Clear and Replace** strategy where the local database is treated
+as the authoritative source during sync up:
+
+#### Algorithm
+
+1. **Backup**: Create SQLite database backup before any changes
+2. **Fetch Current State**: Download current Google Sheet data for comparison
+3. **Validation**: Verify local data is not empty (prevent accidental wipes)
+4. **Conflict Detection**: Compare local vs remote to detect external modifications
+5. **User Confirmation**: If conflicts detected, require `--force` flag or user confirmation
+6. **Clear Sheet**: Remove all existing data from the sheet (except headers)
+7. **Write Data**: Upload all rows from local database
+8. **Verification**: Optionally re-fetch to verify write succeeded
+
+#### Implementation Details
+
+```rust
+async fn sync_up(&mut self, sheet_name: &str, local_data: &[Vec<String>]) -> Result<()> {
+    // 1. Fetch current sheet state
+    let remote_data = self.sheet.get(sheet_name).await?;
+
+    // 2. Detect conflicts (if remote differs from last sync)
+    if has_external_changes(&remote_data, &last_sync_state) {
+        if !force_flag {
+            bail!("External changes detected. Use --force to overwrite.");
+        }
+    }
+
+    // 3. Replace all data
+    self.sheet._put(sheet_name, local_data).await?;
+
+    Ok(())
+}
+```
+
+#### Why Not Row-by-Row Reconciliation?
+
+Row-by-row reconciliation is not viable because:
+
+- **No Transaction ID Column in Categories/AutoCat**: Unlike Transactions which has a unique ID,
+  Categories and AutoCat sheets lack stable identifiers
+- **Row Reordering**: Users can reorder rows in the UI, breaking index-based matching
+- **Performance**: Individual row updates are slow (one API call per row)
+- **Complexity**: Handling all edge cases (adds, deletes, updates, reorders) is error-prone
+
+#### Safety Measures
+
+To prevent data loss:
+
+1. **Backups**: SQLite database is backed up before every sync operation
+2. **Sheet Snapshots**: Download current sheet data before overwriting
+3. **Non-Empty Validation**: Refuse to sync if local database is empty
+4. **Conflict Detection**: Warn if sheet was modified externally since last sync
+5. **Force Flag**: Require explicit `--force` for overwrite when conflicts exist
+
+#### User Workflow
+
+**Normal sync up (no conflicts):**
+```bash
+tiller sync up
+# ✓ Uploaded 1,245 transactions, 15 categories, 8 AutoCat rules
+```
+
+**With external modifications:**
+```bash
+tiller sync up
+# ⚠ Warning: Google Sheet was modified externally since last sync
+# Run with --force to overwrite, or sync down first to merge changes
+```
+
+**Forced overwrite:**
+```bash
+tiller sync up --force
+# ⚠ Overwriting external changes in Google Sheet
+# ✓ Uploaded 1,245 transactions, 15 categories, 8 AutoCat rules
+```
+
+### Implementation Notes
+
+- The `_put` method uses Google Sheets API `values_update` endpoint
+- Data is written to range `A1:ZZ` to cover all columns
+- Empty rows at the end of the sheet are automatically cleared
+- The API call uses `ValueInputOption::Raw` to preserve formulas and formatting
+
 ## Notes and Todos
 
 This describes editing the transactions sheet:

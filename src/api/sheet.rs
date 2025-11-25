@@ -50,9 +50,41 @@ impl Sheet for GoogleSheet {
         Ok(response.body.values)
     }
 
-    async fn _put(&mut self, _sheet_name: &str, _data: &[Vec<String>]) -> Result<()> {
+    async fn _put(&mut self, sheet_name: &str, data: &[Vec<String>]) -> Result<()> {
         self.refresh_client().await?;
-        todo!()
+
+        // Use the sheets API to update values
+        // The range A1:ZZ covers all columns we need
+        let range = format!("{sheet_name}!A1:ZZ");
+
+        // Convert our data to Vec<Vec<String>>
+        let values: Vec<Vec<String>> = data.to_vec();
+
+        // Create the value range
+        let value_range = sheets::types::ValueRange {
+            major_dimension: Some(sheets::types::Dimension::Rows),
+            range: range.clone(),
+            values,
+        };
+
+        // Update the values in the sheet
+        // values_update requires: spreadsheet_id, range, include_values_in_response,
+        // response_date_time_render_option, response_value_render_option, value_input_option, body
+        self.client
+            .spreadsheets()
+            .values_update(
+                self.config.spreadsheet_id(),
+                &range,
+                false, // include_values_in_response
+                DateTimeRenderOption::FormattedString,
+                ValueRenderOption::FormattedValue,
+                sheets::types::ValueInputOption::Raw,
+                &value_range,
+            )
+            .await
+            .with_context(|| format!("Failed to update {sheet_name} sheet data"))?;
+
+        Ok(())
     }
 }
 

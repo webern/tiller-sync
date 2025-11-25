@@ -46,7 +46,7 @@ pub async fn main_inner(args: Args) -> Result<()> {
             }
         }
         Command::Sync(sync_args) => match sync_args.direction() {
-            UpDown::Up => unimplemented!("'sync up' command not yet implemented"),
+            UpDown::Up => commands::sync_up(config).await,
             UpDown::Down => commands::sync_down(config).await,
         },
     }

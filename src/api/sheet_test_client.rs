@@ -11,6 +11,7 @@ use std::io::Cursor;
 
 /// An implementation of the `Sheet` trait that does not use Google sheets. It can hold any data in
 /// memory and, by default, is seeded with some existing data.
+#[derive(Clone)]
 pub(crate) struct TestSheet {
     pub(crate) data: HashMap<String, Vec<Vec<String>>>,
 }

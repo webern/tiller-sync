@@ -7,6 +7,8 @@ mod files;
 mod oauth;
 mod sheet;
 mod sheet_test_client;
+#[cfg(test)]
+mod sheet_tests;
 mod tiller;
 
 use crate::api::sheet::GoogleSheet;
