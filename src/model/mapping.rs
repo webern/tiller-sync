@@ -84,6 +84,11 @@ impl Mapping {
     pub fn headers(&self) -> &[Header] {
         &self.headers
     }
+
+    pub fn _header_index(&self, header: impl Into<Header>) -> Option<usize> {
+        let h = header.into();
+        self.header_map.get(&h).cloned()
+    }
 }
 
 impl Serialize for Mapping {

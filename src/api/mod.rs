@@ -12,7 +12,7 @@ mod tiller;
 use crate::api::sheet::GoogleSheet;
 use crate::api::sheet_test_client::TestSheet;
 use crate::api::tiller::TillerImpl;
-use crate::model::TillerData;
+use crate::model::{Amount, RowCol, TillerData};
 use crate::{Config, Result};
 pub(super) use oauth::TokenProvider;
 use std::env::VarError;
@@ -90,9 +90,35 @@ pub trait Tiller {
 
 #[tokio::test]
 async fn test_sync_down_behavior() {
+    use std::str::FromStr;
+
     let client = Box::new(TestSheet::default());
     let mut tiller = crate::api::tiller(client).await.unwrap();
     let tiller_data = tiller.get_data().await.unwrap();
+
+    // Check that the test data is coming through correctly with an =ABS(E1) formula in
+    // Custom Column
+    for (tix, transaction) in tiller_data.transactions.data().iter().enumerate() {
+        let amount = &transaction.amount;
+        let abs = Amount::from_str(transaction.other_fields.get("Custom Column").unwrap()).unwrap();
+        assert_eq!(amount.value().abs(), abs.value());
+        let formula = format!("=ABS(E{})", tix + 2);
+        let cix = tiller_data
+            .transactions
+            .mapping()
+            ._header_index("Custom Column")
+            .unwrap();
+        let formula_cell = RowCol::new(tix, cix);
+        let found_formula = tiller_data
+            .transactions
+            .formulas()
+            .get(&formula_cell)
+            .unwrap()
+            .to_owned();
+        assert_eq!(formula, found_formula);
+    }
+
+    // Round-trip the JSON serialization/deserialization
     let tiller_data_serialized = serde_json::to_string_pretty(&tiller_data).unwrap();
     let tiller_data_deserialized: TillerData =
         serde_json::from_str(&tiller_data_serialized).unwrap();
