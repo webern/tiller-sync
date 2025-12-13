@@ -169,9 +169,11 @@ impl TokenProvider {
 
         // Load both files
         let secret_file = File::<SecretFile>::load(&secret_path).await?;
-        let token_file = File::<TokenFile>::load(&token_path).await?;
 
-        // TokenFile::load already validates scopes
+        // Load and validate token file (validates that required scopes are present)
+        let token_data = TokenFile::load(&token_path).await?;
+        let token_file = File::new(&token_path, token_data);
+
         Ok(Self {
             secret: secret_file,
             token: token_file,

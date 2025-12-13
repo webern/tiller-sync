@@ -17,10 +17,10 @@ use crate::{Config, Result};
 pub(super) use oauth::TokenProvider;
 use std::env::VarError;
 
-// OAuth scopes required for Sheets API access
+// OAuth scopes required for Sheets API access and Drive file operations (backup copies)
 const OAUTH_SCOPES: &[&str] = &[
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.file",
 ];
 
 // These are the sheet tab names that we care about.
