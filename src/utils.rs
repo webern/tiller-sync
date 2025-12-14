@@ -1,7 +1,8 @@
 use crate::Result;
 use anyhow::Context;
 use serde::de::DeserializeOwned;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use tokio::fs::ReadDir;
 
 /// Write a file.
 pub(crate) async fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> Result<()> {
@@ -12,14 +13,14 @@ pub(crate) async fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) ->
 }
 
 /// Read a file to a `String`.
-pub async fn read(path: &Path) -> Result<String> {
+pub(crate) async fn read(path: &Path) -> Result<String> {
     tokio::fs::read_to_string(path)
         .await
         .with_context(|| format!("Failed to read file at {}", path.display()))
 }
 
 /// Deserialize a JSON file into type `T`.
-pub async fn deserialize<T>(path: &Path) -> Result<T>
+pub(crate) async fn deserialize<T>(path: &Path) -> Result<T>
 where
     T: DeserializeOwned,
 {
@@ -29,7 +30,7 @@ where
 }
 
 /// Basically move a file. Renames `from` -> `to`.
-pub async fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
+pub(crate) async fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
     tokio::fs::rename(from.as_ref(), to.as_ref())
         .await
         .with_context(|| {
@@ -37,6 +38,62 @@ pub async fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> 
                 "Unable to copy file from '{}' to '{}'",
                 from.as_ref().to_string_lossy(),
                 to.as_ref().to_string_lossy()
+            )
+        })
+}
+
+pub(crate) async fn canonicalize(path: impl AsRef<Path>) -> Result<PathBuf> {
+    tokio::fs::canonicalize(path.as_ref())
+        .await
+        .with_context(|| {
+            format!(
+                "Unable to canonicalize path '{}'",
+                path.as_ref().to_string_lossy()
+            )
+        })
+}
+
+pub(crate) async fn make_dir(path: impl AsRef<Path>) -> Result<()> {
+    tokio::fs::create_dir_all(path.as_ref())
+        .await
+        .with_context(|| {
+            format!(
+                "Unable to create directory at {}",
+                path.as_ref().to_string_lossy()
+            )
+        })
+}
+
+pub(crate) async fn read_dir(path: impl AsRef<Path>) -> Result<ReadDir> {
+    tokio::fs::read_dir(path.as_ref()).await.with_context(|| {
+        format!(
+            "Unable to run read_dir on {}",
+            path.as_ref().to_string_lossy()
+        )
+    })
+}
+
+/// Copy a file from `from` to `to`.
+pub(crate) async fn copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<u64> {
+    tokio::fs::copy(from.as_ref(), to.as_ref())
+        .await
+        .with_context(|| {
+            format!(
+                "Unable to copy file from '{}' to '{}'",
+                from.as_ref().to_string_lossy(),
+                to.as_ref().to_string_lossy()
+            )
+        })
+}
+
+/// Remove a file.
+pub(crate) async fn remove(path: impl AsRef<Path>) -> Result<()> {
+    tokio::fs::remove_file(path.as_ref())
+        .await
+        .with_context(|| {
+            format!(
+                "Unable to remove file at '{}'",
+                path.as_ref().to_string_lossy()
             )
         })
 }

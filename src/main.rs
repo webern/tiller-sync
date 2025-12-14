@@ -24,21 +24,15 @@ async fn main() -> ExitCode {
 
 pub async fn main_inner(args: Args) -> Result<()> {
     trace!("{args:?}");
-
-    // Initialize home directory
-    let config = Config::new(args.common().tiller_home().path()).await?;
+    let home = args.common().tiller_home().path();
 
     // Route to appropriate command handler
     match args.command() {
         Command::Init(init_args) => {
-            commands::init(
-                args.common().tiller_home(),
-                init_args.client_secret(),
-                init_args.sheet_url(),
-            )
-            .await
+            commands::init(home, init_args.client_secret(), init_args.sheet_url()).await
         }
         Command::Auth(auth_args) => {
+            let config = Config::load(home).await?;
             if auth_args.verify() {
                 commands::auth_verify(&config).await
             } else {
@@ -46,8 +40,8 @@ pub async fn main_inner(args: Args) -> Result<()> {
             }
         }
         Command::Sync(sync_args) => match sync_args.direction() {
-            UpDown::Up => unimplemented!("'sync up' command not yet implemented"),
-            UpDown::Down => commands::sync_down(config).await,
+            UpDown::Up => commands::sync_up(Config::load(home).await?).await,
+            UpDown::Down => commands::sync_down(Config::load(home).await?).await,
         },
     }
 }

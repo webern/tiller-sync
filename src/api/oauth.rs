@@ -169,9 +169,11 @@ impl TokenProvider {
 
         // Load both files
         let secret_file = File::<SecretFile>::load(&secret_path).await?;
-        let token_file = File::<TokenFile>::load(&token_path).await?;
 
-        // TokenFile::load already validates scopes
+        // Load and validate token file (validates that required scopes are present)
+        let token_data = TokenFile::load(&token_path).await?;
+        let token_file = File::new(&token_path, token_data);
+
         Ok(Self {
             secret: secret_file,
             token: token_file,
@@ -369,25 +371,20 @@ async fn receive_oauth_callback(listener: TcpListener, expected_csrf: CsrfToken)
                 if let Some(state) = params.get("state") {
                     if state == csrf.secret() {
                         *auth_code.lock().await = Some(Ok(code.clone()));
-                        Response::builder()
-                            .status(StatusCode::OK)
-                            .body(
-                                "Authorization successful! You can close this window.".to_string(),
-                            )
-                            .unwrap()
+                        Response::builder().status(StatusCode::OK).body(
+                            "Authorization successful! You can close this window.".to_string(),
+                        )?
                     } else {
                         *auth_code.lock().await = Some(Err(anyhow!("CSRF token mismatch")));
                         Response::builder()
                             .status(StatusCode::BAD_REQUEST)
-                            .body("CSRF token mismatch".to_string())
-                            .unwrap()
+                            .body("CSRF token mismatch".to_string())?
                     }
                 } else {
                     *auth_code.lock().await = Some(Err(anyhow!("No state parameter")));
                     Response::builder()
                         .status(StatusCode::BAD_REQUEST)
-                        .body("No state parameter".to_string())
-                        .unwrap()
+                        .body("No state parameter".to_string())?
                 }
             } else if let Some(error) = params.get("error") {
                 let error_desc = params
@@ -397,13 +394,11 @@ async fn receive_oauth_callback(listener: TcpListener, expected_csrf: CsrfToken)
                 *auth_code.lock().await = Some(Err(anyhow!("OAuth error: {error} - {error_desc}")));
                 Response::builder()
                     .status(StatusCode::BAD_REQUEST)
-                    .body(format!("Authorization failed: {error_desc}"))
-                    .unwrap()
+                    .body(format!("Authorization failed: {error_desc}"))?
             } else {
                 Response::builder()
                     .status(StatusCode::BAD_REQUEST)
-                    .body("Missing authorization code".to_string())
-                    .unwrap()
+                    .body("Missing authorization code".to_string())?
             };
 
             Ok::<_, anyhow::Error>(response)

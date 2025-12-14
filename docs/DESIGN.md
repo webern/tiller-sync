@@ -1,15 +1,19 @@
 # Tiller Design
 
-The tiller app provides two main modes of operation, one for syncing data between a local datastore
-and the user's Tiller Google sheet, and one that provides the MCP interface so that it can be used
-as an MCP tool.
+The tiller app provides two main modes of operation:
+
+1. CLI based: one for syncing data between a local datastore and the user's Tiller Google sheet
+2. MCP interface so that it can be used by an AI agent.
 
 ### Design Principles
 
-- **Separation of Concerns**: API code focuses on API operations; configuration code handles paths
-  and settings
-- **Testability**: API operations use traits to enable mocking without requiring actual Google
-  sheets interactions
+- **Separation of Concerns**:
+    - The `api` module code focuses on OAuth and Google API operations
+    - The `commands` module has top-level, end-to-end operations that can be called by either the
+      CLI mode or the MCP mode.
+    - The `model` module contains data-model structs such as `Transaction`.
+- **Testability**: Google API operations use traits to enable mocking without requiring actual
+  Google sheets interactions
 
 ## CLI: High Level Overview
 
@@ -55,7 +59,7 @@ information as a callback from the browser.
 
 In detail, the workflow of `tiller auth` is as follows:
 
-1. **Delete existing token** - If `token.json` exists, delete it to ensure a fresh authentication
+1. **Delete existing `token.json`** file if it exists.
 2. **Load OAuth credentials** from `client_secret.json`
 3. **Validate redirect URI** - Ensures the file contains the configured redirect URI
 4. **Create OAuth client** using the `oauth2` crate
@@ -63,14 +67,13 @@ In detail, the workflow of `tiller auth` is as follows:
 6. **Start local HTTP server** to receive the OAuth callback
 7. **Open user's browser** to the authorization URL
 8. **Wait for callback** - The local server captures the authorization code
-9. **Exchange code for tokens** - Request access and refresh tokens from Google
+9. **Request tokens**
 10. **Save tokens** to `token.json`
 11. **Shut down local server**
 12. **Confirm success** to user
 
-**Important**: `tiller auth` is the only CLI command that initiates this interactive workflow. Every
-other command is expected to be scriptable, and should simply error out if OAuth authentication does
-not work.
+**Important**: `tiller auth` is the ONLY operation that initiates this interactive workflow. All
+other operations should be scriptable.
 
 #### `tiller auth --verify`
 
@@ -78,21 +81,21 @@ To check authentication, and refresh the token, users can call `tiller auth --ve
 `--verify` flag ensures that the command is non-interactive and will either
 
 - Error if authentication does not work, or
-- Report success if authentication worked and the token was refreshed.
+- Report success if authentication worked and the tokens were refreshed
 
 ### Syncing
 
 Uploading local changes to the Tiller Google Sheet:
 
 ```bash
-# Upload transactions and categories from the local datastore, overwriting where different
+# Upload and overwrite transactions and categories FROM the local datastore TO the Google Sheet
 tiller sync up
 ```
 
 Downloading changes from the Tiller Google Sheet:
 
 ```bash
-# Download transactions and categories to the local datastore, overwriting where difference
+# Download and overwrite transactions and categories FROM the Google Sheet TO the local datastore
 tiller sync down
 ```
 
@@ -110,64 +113,12 @@ The MCP interface shares the same underlying business logic as the CLI commands.
 tiller mcp
 ```
 
-**Theoretical interaction:**
-
-Input (JSON-RPC request from MCP client via stdin):
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "tiller__query_transactions",
-    "arguments": {
-      "category": "Groceries",
-      "start_date": "2024-10-01",
-      "end_date": "2024-10-31"
-    }
-  }
-}
-```
-
-Output (JSON-RPC response to MCP client via stdout):
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "transactions": [
-      {
-        "id": "tx_123",
-        "date": "2024-10-15",
-        "description": "Whole Foods",
-        "amount": -87.43,
-        "category": "Groceries",
-        "account": "Checking"
-      },
-      {
-        "id": "tx_124",
-        "date": "2024-10-22",
-        "description": "Trader Joes",
-        "amount": -65.20,
-        "category": "Groceries",
-        "account": "Checking"
-      }
-    ],
-    "total": -152.63,
-    "count": 2
-  }
-}
-```
-
 ### CLI and MCP Agreement
 
 In general, there will be an agreement between the CLI interface a person can use, and the tools
 that are available in MCP mode.
 
-For example: The above theoretical interaction would also be available directly as something
-like this:
+For example, the following (theoretical) query command could also be made available as an MCP tool:
 
 ```bash
 tiller query transactions \
@@ -176,14 +127,17 @@ tiller query transactions \
   --end-date '2024-10-31'
 ```
 
-## Local Directory Structure
+## Tiller Home: Local Directory Structure
 
 There will be a local directory for storage and local editing of Tiller transactions and categories.
+This directory is referred to as Tiller Home. The only command that works without a pre-existing
+datastore directory is `tiller init`. Every other command will error out if the directory or config
+file cannot be found.
 
 A global flag will be needed to specify the location of this directory,
 
 ```
---dir ~/my/location/for/tiller`.
+--tiller-home ~/my/location/for/tiller`.
 ```
 
 However, it would be cumbersome to always provide this, so we will also accept it as an environment
@@ -212,9 +166,12 @@ The structure of the local directory will look like this:
 └── tiller.sqlite
 ```
 
-Each time a sync occurs, a backup of the SQLite database is created. The backup is a simple copy of
-the SQLite database file. The number of copies of backups to keep is configurable. A basic
-configuration file looks like this:
+Each time a sync occurs, backups of the SQL Lite database and Google sheet are created.
+
+- TODO: The exact timing and nature of these backups is yet to be determined.
+- TODO: I have concerns about corrupting the Tiller Google Sheet
+
+## Configuration
 
 ```json
 {
@@ -234,11 +191,10 @@ The `client_secret_path` and `token_path` fields are optional. Paths can be abso
 the `config.json` file. If omitted, they default to `$TILLER_HOME/.secrets/client_secret.json` and
 `$TILLER_HOME/.secrets/token.json` respectively.
 
-The term "Local Datastore" can either refer to the directory which contains all of this, or to the
-main SQLite file, depending on context.
+## Datastore
 
-The only command that works without a pre-existing datastore directory is `tiller init`. Every other
-command will error out if the directory or config file cannot be found.
+The term *Local Datastore* or *Datastore* can either refer to the directory which contains all of
+this, or to the main SQLite file, depending on context.
 
 ## Logging
 
@@ -268,11 +224,11 @@ The implementation uses:
 
 **Why manual OAuth implementation:**
 
-The problem with `yup-oauth2` is that it would automatically enter the interactive workflow if there
-was any problem with authentication or missing scopes, etc. Claude and I could *not* find a
-reasonable way to prevent this and I do not want this happening during CLI commands that are
-expected to be non-interactive. Furthermore, the `google-sheets4` crate was deeply coupled to
-`yup-oauth2`.
+Historical Note: The problem with `yup-oauth2` is that it would automatically enter the interactive
+workflow if there was any problem with authentication or missing scopes, etc. Claude and I could
+*not* find a reasonable way to prevent this and I do not want this happening during CLI commands
+that are expected to be non-interactive. Furthermore, the `google-sheets4` crate was deeply coupled
+to `yup-oauth2`.
 
 Thus: we decided to use `oauth2` and `sheets`.
 
@@ -302,10 +258,6 @@ The file structure follows Google's standard format:
 The application will extract `client_id`, `client_secret`, and the first `redirect_uri` from this
 file.
 
-**Important**: When creating OAuth credentials in Google Cloud Console, users must set the redirect
-URI to `http://localhost`. This is automatically provided if the user selects "Desktop App" when
-creating the credentials. We enforce this requirement during deserialization.
-
 During the OAuth flow, the application automatically runs a temporary local HTTP server on a random
 available port to capture the authorization callback from Google.
 
@@ -317,7 +269,7 @@ Generated after successful OAuth consent flow. The file contains:
 {
   "scopes": [
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive.readonly"
+    "https://www.googleapis.com/auth/drive.file"
   ],
   "access_token": "<ACCESS_TOKEN_DATA>",
   "refresh_token": "<REFRESH_TOKEN_DATA>",
@@ -337,8 +289,8 @@ During the `tiller sync down` call, the following happens.
 - If more than `backup_copies` of the SQLite database exist, the extras are deleted.
 - Three tabs from the `sheet_url`, *Transactions*, *Categories*, and *AutoCat*
 - These are held in memory for further processing but also written out to
-  `$TILLER_HOME/.backups/download.2025-11-09-001.json`.
-- If there are more than `backup_copies` of `download.*.json` files, the oldest are deleted.
+  `$TILLER_HOME/.backups/sync-down.2025-11-09-001.json`.
+- If there are more than `backup_copies` of `sync-down.*.json` files, the oldest are deleted.
 - Each of three tables in tiller.sqlite is upserted with the downloaded values.
     - Rows will be added to the database for new rows found in the sheets.
     - Rows will be deleted from the database for rows deleted from the sheets.
@@ -346,9 +298,9 @@ During the `tiller sync down` call, the following happens.
 
 ### Up
 
-The `tiller sync up` command synchronizes local changes from the SQLite database to the Google Sheet.
-This operation requires careful design to prevent data corruption given the constraints of the
-Google Sheets API.
+The `tiller sync up` command synchronizes local changes from the SQLite database to the Google
+Sheet. This operation requires careful design to prevent data corruption given the constraints of
+the Google Sheets API.
 
 #### Design Constraints
 
@@ -357,7 +309,8 @@ Google Sheets API.
 2. **No Atomic Transactions**: Multiple operations cannot be grouped into an atomic transaction
 3. **Structure Instability**: Users can reorder columns or sort rows at any time
 4. **Concurrent Modifications**: The sheet could be edited during our sync operation
-5. **Range-Based Updates**: The API addresses cells using A1 notation (e.g., "Transactions!A2:Z100")
+5. **Range-Based Updates**: The API addresses cells using `A1` notation (e.g.,
+   `Transactions!A2:Z100`)
 
 #### Strategy: Clear and Replace with Verification
 
@@ -368,25 +321,26 @@ dependencies on row/column ordering and provides predictable, repeatable results
 **Algorithm:**
 
 1. **Precondition Checks**
-    - If the datastore does not exist, error with message: "Run 'tiller sync down' first"
-    - If the SQLite database is empty of transactions, error with message: "Run 'tiller sync down'
+    - If the datastore does not exist, error with message: "Run `tiller sync down` first"
+    - If the SQLite database is empty of transactions, error with message: "Run `tiller sync down`
       first"
 
-2. **Backup Operations**
+2. **Backup SQLite**
     - Create backup of SQLite database with timestamp (e.g., `tiller.sqlite.2025-11-21-003`)
-    - Delete oldest backups if more than `backup_copies` exist
+    - Delete the oldest backups if more than `backup_copies` exist
 
 3. **Download Current Sheet State**
     - Fetch all three tabs: Transactions, Categories, AutoCat
-    - Save to backup file: `$TILLER_HOME/.backups/upload-snapshot.YYYY-MM-DD-NNN.json`
+    - Save to backup file: `$TILLER_HOME/.backups/sync-up-pre.YYYY-MM-DD-NNN.json`
     - This serves as a snapshot of what we're about to overwrite
-    - Delete oldest upload snapshots if more than `backup_copies` exist
+    - Delete the oldest `sync-up-pre` snapshot if more than `backup_copies` exist
 
 4. **Conflict Detection (Optional but Recommended)**
-    - Compare downloaded sheet data with most recent `download.*.json` backup
+    - Compare downloaded sheet data with most recent `sync-down.*.json` backup
     - If differences detected, warn user: "Sheet has been modified since last sync down"
     - Count differences: `N transactions added, M modified, P deleted since last download`
-    - Recommend: "Run 'tiller sync down' first to merge changes, or use --force to overwrite"
+    - Recommend: "Merge changes manually and run 'tiller sync down' first, or use --force to
+      overwrite"
     - If `--force` not provided, abort sync
 
 5. **Build Output Data**
@@ -397,7 +351,14 @@ dependencies on row/column ordering and provides predictable, repeatable results
         - Ensure calculated fields are populated (Month, Week for transactions)
         - Sort rows by a predictable field (e.g., Date for transactions, then transaction_id)
 
-6. **Execute Batch Clear and Write**
+6. **Backup Google Sheet**
+    - Use the Google Drive API `files.copy` endpoint to create a full copy of the spreadsheet
+    - Set the copy's name to `<original-sheet-name>-backup-YYYY-MM-DD-NNN`
+    - This requires the `drive.file` scope
+    - Store the backup file ID in the sync log for potential recovery
+    - Consider: delete old backup copies from Drive if more than `backup_copies` exist
+
+7. **Execute Batch Clear and Write**
     - Using `spreadsheets().values_batch_update()` for efficiency:
         - **Operation 1**: Clear each tab's data range (preserve sheet structure, delete all rows
           except header)
@@ -414,106 +375,23 @@ dependencies on row/column ordering and provides predictable, repeatable results
             - AutoCat: `"AutoCat!A2:ZZ"`
     - Use `ValueInputOption::UserEntered` to allow Sheets to parse dates/numbers/formulas
 
-7. **Verification**
+8. **Verification**
     - Re-fetch row counts from each tab
     - Verify counts match what we wrote
     - Log summary: `"Synced N transactions, M categories, P autocat rules to sheet"`
 
-8. **Error Handling**
+9. **Error Handling**
     - If any operation fails, the backup files allow manual recovery
     - Log all operations to stderr at INFO level
-    - On failure, provide clear message about which backup to restore from
+    - On failure, provide clear message about which backup to restore and hint at how to do it.
 
 **Implementation with sheets crate:**
-
-```rust
-// Build batch request
-let batch_request = BatchUpdateValuesRequest {
-    data: vec![
-        // Headers
-        ValueRange {
-            range: "Transactions!A1:ZZ1".to_string(),
-            major_dimension: Some(Dimension::Rows),
-            values: vec![transactions_header_row],
-        },
-        ValueRange {
-            range: "Categories!A1:ZZ1".to_string(),
-            major_dimension: Some(Dimension::Rows),
-            values: vec![categories_header_row],
-        },
-        ValueRange {
-            range: "AutoCat!A1:ZZ1".to_string(),
-            major_dimension: Some(Dimension::Rows),
-            values: vec![autocat_header_row],
-        },
-        // Data (after clearing)
-        ValueRange {
-            range: "Transactions!A2:ZZ".to_string(),
-            major_dimension: Some(Dimension::Rows),
-            values: transactions_data,
-        },
-        ValueRange {
-            range: "Categories!A2:ZZ".to_string(),
-            major_dimension: Some(Dimension::Rows),
-            values: categories_data,
-        },
-        ValueRange {
-            range: "AutoCat!A2:ZZ".to_string(),
-            major_dimension: Some(Dimension::Rows),
-            values: autocat_data,
-        },
-    ],
-    value_input_option: Some(ValueInputOption::UserEntered),
-    include_values_in_response: Some(false),
-    ..Default::default()
-};
-
-// Clear existing data first
-let clear_request = BatchClearValuesRequest {
-    ranges: vec![
-        "Transactions!A2:ZZ".to_string(),
-        "Categories!A2:ZZ".to_string(),
-        "AutoCat!A2:ZZ".to_string(),
-    ],
-};
-client.spreadsheets()
-    .values_batch_clear(spreadsheet_id, &clear_request)
-    .await?;
-
-// Write all data
-let response = client.spreadsheets()
-    .values_batch_update(spreadsheet_id, &batch_request)
-    .await?;
-
-// Verify
-log::info!("Updated {} cells across {} rows",
-    response.body.total_updated_cells,
-    response.body.total_updated_rows);
-```
-
-#### Why Not Row-by-Row Reconciliation?
-
-An alternative approach would be to:
-1. Download current sheet state
-2. Build ID-based maps (transaction_id → row)
-3. Compute diffs (rows to add, update, delete)
-4. Apply targeted updates to specific cells
-
-**Problems with this approach:**
-
-- **Row order dependency**: If user sorts the sheet, our row positions become invalid
-- **Race conditions**: Sheet could change between our read and write operations
-- **Complex error recovery**: Partial updates are hard to roll back
-- **API limitations**: No way to update "row with ID X" directly - must use row numbers
-- **Column reordering**: User could drag columns; we'd write to wrong cells
-
-The clear-and-replace strategy is simpler, more robust, and provides predictable behavior.
 
 #### Safety Measures
 
 1. **Always backup before syncing** - Multiple recovery points available
 2. **Conflict detection** - Warn if sheet was modified since last download
-3. **`--force` flag** - Require explicit confirmation to overwrite remote changes
+3. **`--force` flag** - Required to overwrite Google sheet in the presence of detected conflicts
 4. **`--dry-run` flag** - Preview what would be changed without actually syncing
 5. **Consistent column order** - Always write headers explicitly to control column positions
 6. **Verification** - Confirm write succeeded by checking row counts
@@ -529,6 +407,7 @@ The clear-and-replace strategy is simpler, more robust, and provides predictable
 #### User Workflow
 
 **Safe workflow** (recommended):
+
 ```bash
 # 1. Download latest changes from sheet
 tiller sync down
@@ -540,6 +419,7 @@ tiller sync up
 ```
 
 **Forcing overwrites** (when local is authoritative):
+
 ```bash
 # Preview changes
 tiller sync up --dry-run
@@ -625,8 +505,7 @@ from the [Tiller documentation](https://help.tiller.com/en/articles/432681).
 - All date fields stored as TEXT in ISO 8601 format (YYYY-MM-DD)
 - `amount` uses NUMERIC type for decimal precision
 - Only `transaction_id`, `date`, `description`, `amount`, `account`, `account_number`,
-  `institution`,
-  and `account_id` are considered required (NOT NULL)
+  `institution`, and `account_id` are considered required (NOT NULL)
 - All other fields are optional (nullable)
 
 **Indexes:**
@@ -645,6 +524,96 @@ CREATE INDEX idx_transactions_description ON transactions (description);
 - The sign convention for `amount` is: positive = income/credits, negative = expenses
 - `Month` and `Week` fields are automatically calculated by Tiller for reporting/grouping purposes.
   If we add rows, we should calculate and populate them.
+
+## Schema Migrations
+
+The SQLite database uses a version-based migration system to manage schema changes over time.
+
+### Version Tracking
+
+A `schema_version` table tracks the current database schema version:
+
+```sql
+CREATE TABLE schema_version (
+    version INTEGER NOT NULL
+);
+```
+
+This table contains a single row with the current schema version number. When a new database is
+created, this table is bootstrapped in Rust code with version `0`. This bootstrap step is separate
+from the migration system - it establishes the invariant that `schema_version` always exists,
+allowing the migration logic to work uniformly for all migrations including `migration_01`.
+
+### Migration Files
+
+Migration files are stored in `src/db/migrations/` with the naming convention:
+
+- `migration_NN_up.sql` - Upgrades schema from version `NN-1` to version `NN`
+- `migration_NN_down.sql` - Downgrades schema from version `NN` to version `NN-1`
+
+For example:
+
+- `migration_01_up.sql` brings the schema from version 0 to version 1
+- `migration_01_down.sql` reverts from version 1 back to version 0
+- `migration_02_up.sql` brings the schema from version 1 to version 2
+
+Migration files are embedded into the binary at compile time using `include_str!`. Each migration
+file must be manually added to the list of embedded files in the source code.
+
+### Version Constant
+
+A `CURRENT_VERSION` constant in `src/db/mod.rs` defines the target schema version. This equals the
+highest migration number available. For example, if `migration_05_up.sql` is the highest numbered
+migration, `CURRENT_VERSION` is `5`.
+
+### Migration Execution
+
+When the database is loaded:
+
+1. Query the current version: `SELECT MAX(version) FROM schema_version`
+2. Compare against `CURRENT_VERSION`
+3. If the database version is lower, run "up" migrations sequentially to reach `CURRENT_VERSION`
+4. If the database version is higher, run "down" migrations sequentially to reach `CURRENT_VERSION`
+
+Each migration is executed within a SQLite transaction (managed in Rust code). The transaction
+includes both the migration SQL and the update to `schema_version`, ensuring they succeed or fail
+together.
+
+### Error Handling
+
+If a migration fails:
+
+- The failed migration's transaction is rolled back
+- The database remains at the last successfully applied version
+- An error is returned with details about which migration failed
+
+For example, if migrating from version 0 to version 5 and migration 3 fails, the database remains at
+version 2 (after migrations 1 and 2 succeeded).
+
+### Logging
+
+Migration activity is logged at `debug` level:
+
+- `"Running migration 01 (up)"`
+- `"Running migration 03 (down)"`
+- `"Migration complete, schema now at version 3"`
+
+### Implementation Details
+
+The `Db` struct provides a private method to query the current schema version:
+
+```rust
+async fn schema_version(&self) -> Result<i32> {
+    // SELECT MAX(version) FROM schema_version
+}
+```
+
+The `Db::load()` and `Db::init()` methods handle migration execution:
+
+- `Db::init()` - Creates the database file, bootstraps `schema_version` with version 0, then runs
+  migrations to reach `CURRENT_VERSION`
+- `Db::load()` - Opens an existing database and runs any needed migrations (up or down) to reach
+  `CURRENT_VERSION`
 
 ## Notes and Todos
 

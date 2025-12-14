@@ -221,19 +221,22 @@ pub(super) struct TokenFile {
 }
 
 impl TokenFile {
-    pub(super) async fn _load(p: impl AsRef<Path>) -> Result<Self> {
+    pub(super) async fn load(p: impl AsRef<Path>) -> Result<Self> {
         let token_file: Self = utils::deserialize(p.as_ref())
             .await
             .context("Unable to deserialize the token JSON file")?;
-        token_file._validate_scopes()?;
+        token_file.validate_scopes()?;
         Ok(token_file)
     }
 
-    fn _validate_scopes(&self) -> Result<()> {
+    fn validate_scopes(&self) -> Result<()> {
         let found_scopes: HashSet<&str> = self.scopes.iter().map(|s| s.as_str()).collect();
         for &required_scope in OAUTH_SCOPES {
             if !found_scopes.contains(required_scope) {
-                bail!("OAuth scope '{required_scope}' is missing.");
+                bail!(
+                    "OAuth scope '{required_scope}' is missing from your saved token. \
+                    The required scopes have changed. Please run `tiller auth` to re-authenticate."
+                );
             }
         }
         Ok(())
@@ -390,10 +393,11 @@ async fn test_validate_token_file_bad() {
     let json_path = tmp.path().join("file.json");
     utils::write(&json_path, &json).await.unwrap();
 
-    let validation_result = TokenFile::_load(&json_path).await;
+    let validation_result = TokenFile::load(&json_path).await;
     assert!(validation_result.is_err());
     let error_message = validation_result.err().unwrap().to_string();
-    assert!(error_message.contains("https://www.googleapis.com/auth/drive.readonly"));
+    assert!(error_message.contains("https://www.googleapis.com/auth/drive.file"));
+    assert!(error_message.contains("tiller auth"));
 }
 
 #[tokio::test]
@@ -406,7 +410,7 @@ async fn test_validate_token_file_good() {
         {
             "scopes": [
                 "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive.readonly"
+                "https://www.googleapis.com/auth/drive.file"
             ],
             "access_token":"abc12",
             "refresh_token":"xyz89",
@@ -420,5 +424,5 @@ async fn test_validate_token_file_good() {
     let json_path = tmp.path().join("file.json");
     utils::write(&json_path, &json).await.unwrap();
 
-    let _ = TokenFile::_load(&json_path).await.unwrap();
+    let _ = TokenFile::load(&json_path).await.unwrap();
 }

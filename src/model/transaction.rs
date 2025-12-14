@@ -76,6 +76,18 @@ impl Transactions {
             formulas,
         })
     }
+
+    pub fn data(&self) -> &Vec<Transaction> {
+        &self.data
+    }
+
+    pub(crate) fn _mapping(&self) -> &Mapping {
+        &self.mapping
+    }
+
+    pub(crate) fn _formulas(&self) -> &BTreeMap<RowCol, String> {
+        &self.formulas
+    }
 }
 
 /// Represents a single row from the Transactions sheet.
@@ -173,10 +185,6 @@ impl Transaction {
         }
 
         Ok(())
-    }
-
-    pub fn set_by_column_name() -> Result<Self> {
-        todo!()
     }
 }
 
