@@ -12,7 +12,7 @@ mod tiller;
 use crate::api::sheet::GoogleSheet;
 use crate::api::sheet_test_client::TestSheet;
 use crate::api::tiller::TillerImpl;
-use crate::model::{Amount, RowCol, TillerData};
+use crate::model::TillerData;
 use crate::{Config, Result};
 pub(super) use oauth::TokenProvider;
 use std::env::VarError;
@@ -90,7 +90,8 @@ pub trait Tiller {
 
 #[tokio::test]
 async fn test_sync_down_behavior() {
-    use std::str::FromStr;
+    use crate::model::{Amount, RowCol};
+    use std::str::FromStr as _;
 
     let client = Box::new(TestSheet::default());
     let mut tiller = crate::api::tiller(client).await.unwrap();
@@ -105,13 +106,13 @@ async fn test_sync_down_behavior() {
         let formula = format!("=ABS(E{})", tix + 2);
         let cix = tiller_data
             .transactions
-            .mapping()
+            ._mapping()
             ._header_index("Custom Column")
             .unwrap();
         let formula_cell = RowCol::new(tix, cix);
         let found_formula = tiller_data
             .transactions
-            .formulas()
+            ._formulas()
             .get(&formula_cell)
             .unwrap()
             .to_owned();

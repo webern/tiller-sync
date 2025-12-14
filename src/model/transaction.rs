@@ -81,11 +81,11 @@ impl Transactions {
         &self.data
     }
 
-    pub(crate) fn mapping(&self) -> &Mapping {
+    pub(crate) fn _mapping(&self) -> &Mapping {
         &self.mapping
     }
 
-    pub(crate) fn formulas(&self) -> &BTreeMap<RowCol, String> {
+    pub(crate) fn _formulas(&self) -> &BTreeMap<RowCol, String> {
         &self.formulas
     }
 }
@@ -185,10 +185,6 @@ impl Transaction {
         }
 
         Ok(())
-    }
-
-    pub fn set_by_column_name() -> Result<Self> {
-        todo!()
     }
 }
 

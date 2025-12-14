@@ -2,6 +2,7 @@ mod api;
 pub mod args;
 pub mod commands;
 mod config;
+mod db;
 mod error;
 pub mod model;
 mod utils;

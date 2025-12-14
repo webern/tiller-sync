@@ -4,6 +4,7 @@
 //! the Tiller application including the Google Sheet URL, backup settings, and authentication
 //! file paths.
 
+use crate::db::Db;
 use crate::{utils, Result};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -30,7 +31,7 @@ pub struct Config {
     secrets: PathBuf,
     config_path: PathBuf,
     config_file: ConfigFile,
-    db: PathBuf,
+    db: Db,
     spreadsheet_id: String,
 }
 
@@ -90,8 +91,9 @@ impl Config {
         };
         config_file.save(&config_path).await?;
 
-        // Initialize the path to the SQLite database (which doesn't exist yet)
-        let db = root.join(TILLER_SQLITE);
+        // Initialize the SQLite database
+        let db_path = root.join(TILLER_SQLITE);
+        let db = Db::init(&db_path).context("Unable to create SQLite DB")?;
 
         // Extract the spreadsheet ID from the URL
         let spreadsheet_id = extract_spreadsheet_id(sheet_url)
@@ -142,13 +144,17 @@ impl Config {
             .context("Failed to extract spreadsheet ID from sheet URL")?
             .to_string();
 
+        // Load the SQLite database
+        let db_path = root.join(TILLER_SQLITE);
+        let db = Db::load(&db_path).context("Unable to create SQLite DB")?;
+
         let config = Self {
             root: root.clone(),
             backups: root.join(".backups"),
             secrets: root.join(".secrets"),
             config_path,
             config_file,
-            db: root.join("tiller.sqlite"),
+            db,
             spreadsheet_id,
         };
         make_dir(&config.backups).await?;
@@ -164,7 +170,7 @@ impl Config {
         &self.config_path
     }
 
-    pub fn db(&self) -> &Path {
+    pub(crate) fn db(&self) -> &Db {
         &self.db
     }
 
