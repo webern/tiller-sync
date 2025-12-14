@@ -48,8 +48,9 @@ What's Already Built for `tiller sync up`
 Next Steps:
 
 - [X] Investigate the existing code base to understand where we left off.
-- [ ] Precondition checks - Verify datastore exists with transactions
-- [ ] Backup SQLite - Not applicable yet (using in-memory/temp storage)
+- [X] Precondition checks - Verify datastore exists with transactions
+- [X] Backup SQLite - Not applicable yet (using in-memory/temp storage) DEFERRED
+- [ ] Add sync-down.*.json backup logic to `tiller sync down`
 - [ ] Download current sheet state - Save to sync-up-pre.*.json backup
 - [ ] Conflict detection - Compare with last sync-down.*.json
 - [ ] Build output data - Convert model objects to Vec<Vec<String>>

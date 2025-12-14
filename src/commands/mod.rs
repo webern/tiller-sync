@@ -9,4 +9,4 @@ mod sync;
 // Re-export command handlers
 pub use auth::{auth, auth_verify};
 pub use init::init;
-pub use sync::sync_down;
+pub use sync::{sync_down, sync_up};
