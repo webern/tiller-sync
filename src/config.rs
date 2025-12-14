@@ -6,15 +6,15 @@
 
 use crate::db::Db;
 use crate::{utils, Result};
-use anyhow::Context;
+use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use tokio::fs;
 
 const APP_NAME: &str = "tiller";
 const CONFIG_VERSION: u8 = 1;
 const BACKUP_COPIES: u32 = 5;
 const SECRETS: &str = ".secrets";
+const BACKUPS: &str = ".backups";
 const CLIENT_SECRET_JSON: &str = "client_secret.json";
 const TOKEN_JSON: &str = "token.json";
 const CONFIG_JSON: &str = "config.json";
@@ -57,23 +57,18 @@ impl Config {
     ) -> Result<Self> {
         // Create the directory if it does not exist
         let maybe_relative = dir.into();
-        make_dir(&maybe_relative)
+        utils::make_dir(&maybe_relative)
             .await
             .context("Unable to create the tiller home directory")?;
 
         // Canonicalize the directory path
-        let root = fs::canonicalize(&maybe_relative).await.with_context(|| {
-            format!(
-                "Unable to canonicalize the path {}",
-                maybe_relative.to_string_lossy()
-            )
-        })?;
+        let root = utils::canonicalize(&maybe_relative).await?;
 
         // Create the subdirectories
         let backups_dir = root.join(".backups");
-        make_dir(&backups_dir).await?;
+        utils::make_dir(&backups_dir).await?;
         let secrets_dir = root.join(".secrets");
-        make_dir(&secrets_dir).await?;
+        utils::make_dir(&secrets_dir).await?;
 
         // Move the Google OAuth client credentials file to its default location in the data dir
         let secret_destination = secrets_dir.join(CLIENT_SECRET_JSON);
@@ -112,33 +107,26 @@ impl Config {
         })
     }
 
-    // TODO: This function's behavior is a bit ambiguous and questionable now that we have `create`.
     /// This will
-    /// - create the `tiller_home` directory, if it does not exist, and canonicalize it.
-    /// - Load `config.json`, or create it if it does not exist.
-    pub async fn new(tiller_home: impl Into<PathBuf>) -> Result<Self> {
+    /// - validate that the  `tiller_home` exists and that the config file exists
+    /// - load the config file
+    /// - validate that the backups and secrets directories exist
+    /// - return the loaded configuration object
+    pub async fn load(tiller_home: impl Into<PathBuf>) -> Result<Self> {
         let maybe_relative = tiller_home.into();
-        make_dir(&maybe_relative)
+        let root = utils::canonicalize(&maybe_relative).await?;
+
+        // Validate that the home directory exists.
+        let _ = utils::read_dir(&root)
             .await
-            .context("Unable to create tiller home directory")?;
-        let root = fs::canonicalize(&maybe_relative).await.with_context(|| {
-            format!(
-                "Unable to canonicalize the path {}",
-                maybe_relative.to_string_lossy()
-            )
-        })?;
+            .context("Tiller Home is missing")?;
+
         let config_path = root.join("config.json");
-        let config_file = match tokio::fs::metadata(&config_path).await {
-            Ok(_) => ConfigFile::load(&config_path).await?,
-            Err(_) => {
-                let config = ConfigFile::default();
-                config
-                    .save(&config_path)
-                    .await
-                    .context("Unable to write default config file")?;
-                config
-            }
-        };
+        if !config_path.is_file() {
+            bail!("The config file is missing '{}'", config_path.display())
+        }
+        let config_file = ConfigFile::load(&config_path).await?;
+
         // Extract the spreadsheet ID from the URL
         let spreadsheet_id = extract_spreadsheet_id(&config_file.sheet_url)
             .context("Failed to extract spreadsheet ID from sheet URL")?
@@ -150,15 +138,25 @@ impl Config {
 
         let config = Self {
             root: root.clone(),
-            backups: root.join(".backups"),
-            secrets: root.join(".secrets"),
+            backups: root.join(BACKUPS),
+            secrets: root.join(SECRETS),
             config_path,
             config_file,
             db,
             spreadsheet_id,
         };
-        make_dir(&config.backups).await?;
-        make_dir(&config.secrets).await?;
+        if !config.backups.is_dir() {
+            bail!(
+                "The backups directory is missing '{}'",
+                config.backups.display()
+            )
+        }
+        if !config.secrets.is_dir() {
+            bail!(
+                "The secrets directory is missing '{}'",
+                config.secrets.display()
+            )
+        }
         Ok(config)
     }
 
@@ -207,12 +205,6 @@ impl Config {
         }
         self.root.join(p)
     }
-}
-
-async fn make_dir(p: &Path) -> Result<()> {
-    fs::create_dir_all(p)
-        .await
-        .with_context(|| format!("Unable to create directory at {}", p.to_string_lossy()))
 }
 
 /// Represents the serialization and deserialization format of the configuration file.
@@ -427,9 +419,13 @@ mod tests {
         use tempfile::TempDir;
         let dir = TempDir::new().unwrap();
         let home_dir = dir.path().to_owned();
-        let home = Config::new(home_dir).await.unwrap();
-        assert!(fs::read_dir(home.backups()).await.is_ok());
-        assert!(fs::read_dir(home.secrets()).await.is_ok());
+        let secret_file = dir.path().join("foo.json");
+        utils::write(&secret_file, "{}").await.unwrap();
+        let url = "https://example.com/spreadsheets/d/MySheetIDX";
+        let config = Config::create(home_dir, &secret_file, &url).await.unwrap();
+        assert!(utils::read_dir(config.backups()).await.is_ok());
+        assert!(utils::read_dir(config.secrets()).await.is_ok());
+        assert_eq!("MySheetIDX", config.spreadsheet_id());
     }
 
     #[test]
