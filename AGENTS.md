@@ -50,10 +50,10 @@ Next Steps:
 - [X] Investigate the existing code base to understand where we left off.
 - [X] Precondition checks - Verify datastore exists with transactions
 - [X] Backup SQLite - Not applicable yet (using in-memory/temp storage) DEFERRED
-- [ ] Add sync-down.*.json backup logic to `tiller sync down`
-- [ ] Download current sheet state - Save to sync-up-pre.*.json backup
-- [ ] Conflict detection - Compare with last sync-down.*.json
+- [X] Add `sync-down.*.json` backup logic to `tiller sync down`
+- [X] Download current sheet state - Save to sync-up-pre.*.json backup
 - [ ] Build output data - Convert model objects to Vec<Vec<String>>
+- [ ] Conflict detection - Compare with last sync-down.*.json
 - [ ] Backup Google Sheet - Use Drive API files.copy endpoint
 - [ ] Execute batch clear and write - Clear data ranges, write headers, write data
 - [ ] Verification - Re-fetch row counts

@@ -72,3 +72,28 @@ pub(crate) async fn read_dir(path: impl AsRef<Path>) -> Result<ReadDir> {
         )
     })
 }
+
+/// Copy a file from `from` to `to`.
+pub(crate) async fn copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<u64> {
+    tokio::fs::copy(from.as_ref(), to.as_ref())
+        .await
+        .with_context(|| {
+            format!(
+                "Unable to copy file from '{}' to '{}'",
+                from.as_ref().to_string_lossy(),
+                to.as_ref().to_string_lossy()
+            )
+        })
+}
+
+/// Remove a file.
+pub(crate) async fn remove(path: impl AsRef<Path>) -> Result<()> {
+    tokio::fs::remove_file(path.as_ref())
+        .await
+        .with_context(|| {
+            format!(
+                "Unable to remove file at '{}'",
+                path.as_ref().to_string_lossy()
+            )
+        })
+}

@@ -4,6 +4,7 @@
 //! the Tiller application including the Google Sheet URL, backup settings, and authentication
 //! file paths.
 
+use crate::backup::Backup;
 use crate::db::Db;
 use crate::{utils, Result};
 use anyhow::{bail, Context};
@@ -33,6 +34,7 @@ pub struct Config {
     config_file: ConfigFile,
     db: Db,
     spreadsheet_id: String,
+    sqlite_path: PathBuf,
 }
 
 impl Config {
@@ -88,7 +90,9 @@ impl Config {
 
         // Initialize the SQLite database
         let db_path = root.join(TILLER_SQLITE);
-        let db = Db::init(&db_path).context("Unable to create SQLite DB")?;
+        let db = Db::init(&db_path)
+            .await
+            .context("Unable to create SQLite DB")?;
 
         // Extract the spreadsheet ID from the URL
         let spreadsheet_id = extract_spreadsheet_id(sheet_url)
@@ -104,6 +108,7 @@ impl Config {
             config_file,
             db,
             spreadsheet_id,
+            sqlite_path: db_path,
         })
     }
 
@@ -134,7 +139,9 @@ impl Config {
 
         // Load the SQLite database
         let db_path = root.join(TILLER_SQLITE);
-        let db = Db::load(&db_path).context("Unable to create SQLite DB")?;
+        let db = Db::load(&db_path)
+            .await
+            .context("Unable to load SQLite DB")?;
 
         let config = Self {
             root: root.clone(),
@@ -144,6 +151,7 @@ impl Config {
             config_file,
             db,
             spreadsheet_id,
+            sqlite_path: db_path,
         };
         if !config.backups.is_dir() {
             bail!(
@@ -186,6 +194,19 @@ impl Config {
 
     pub fn spreadsheet_id(&self) -> &str {
         &self.spreadsheet_id
+    }
+
+    pub fn sqlite_path(&self) -> &Path {
+        &self.sqlite_path
+    }
+
+    pub fn backup_copies(&self) -> u32 {
+        self.config_file.backup_copies
+    }
+
+    /// Creates a new `Backup` instance for managing backup files.
+    pub fn backup(&self) -> Backup {
+        Backup::new(self)
     }
 
     /// Returns the stored `client_secret_path` if it is absolute, otherwise resolves the relative path.

@@ -1,6 +1,6 @@
 //! This module is responsible for reading, writing and managing the SQLite database
 
-use crate::Result;
+use crate::{utils, Result};
 use std::path::Path;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -14,7 +14,7 @@ impl Db {
     /// - Creates a SQLite client
     /// - Updates the database schema with migrations if it is out-of-date
     /// - Returns a constructed `Datastore` object for further operations
-    pub(crate) fn load(_path: impl AsRef<Path>) -> Result<Self> {
+    pub(crate) async fn load(_path: impl AsRef<Path>) -> Result<Self> {
         // TODO: validate the SQLite file exists and that the schema is valid. Run migrations.
         Ok(Self { _sql_client: () })
     }
@@ -23,8 +23,10 @@ impl Db {
     /// - Creates a new SQLite file at `path`
     /// - Initializes the database schema
     /// - Returns a constructed `Datastore` object for further operations
-    pub(crate) fn init(_path: impl AsRef<Path>) -> Result<Self> {
-        // TODO: create the initial SQLite file (error if one exists) and initialize the schema.
+    pub(crate) async fn init(path: impl AsRef<Path>) -> Result<Self> {
+        // TODO: Replace this stub with actual SQLite initialization.
+        // For now, create a stub file so that backup operations have something to copy.
+        utils::write(path.as_ref(), "Hello I'm a SQLite File").await?;
         Ok(Self { _sql_client: () })
     }
 
