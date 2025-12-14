@@ -525,6 +525,96 @@ CREATE INDEX idx_transactions_description ON transactions (description);
 - `Month` and `Week` fields are automatically calculated by Tiller for reporting/grouping purposes.
   If we add rows, we should calculate and populate them.
 
+## Schema Migrations
+
+The SQLite database uses a version-based migration system to manage schema changes over time.
+
+### Version Tracking
+
+A `schema_version` table tracks the current database schema version:
+
+```sql
+CREATE TABLE schema_version (
+    version INTEGER NOT NULL
+);
+```
+
+This table contains a single row with the current schema version number. When a new database is
+created, this table is bootstrapped in Rust code with version `0`. This bootstrap step is separate
+from the migration system - it establishes the invariant that `schema_version` always exists,
+allowing the migration logic to work uniformly for all migrations including `migration_01`.
+
+### Migration Files
+
+Migration files are stored in `src/db/migrations/` with the naming convention:
+
+- `migration_NN_up.sql` - Upgrades schema from version `NN-1` to version `NN`
+- `migration_NN_down.sql` - Downgrades schema from version `NN` to version `NN-1`
+
+For example:
+
+- `migration_01_up.sql` brings the schema from version 0 to version 1
+- `migration_01_down.sql` reverts from version 1 back to version 0
+- `migration_02_up.sql` brings the schema from version 1 to version 2
+
+Migration files are embedded into the binary at compile time using `include_str!`. Each migration
+file must be manually added to the list of embedded files in the source code.
+
+### Version Constant
+
+A `CURRENT_VERSION` constant in `src/db/mod.rs` defines the target schema version. This equals the
+highest migration number available. For example, if `migration_05_up.sql` is the highest numbered
+migration, `CURRENT_VERSION` is `5`.
+
+### Migration Execution
+
+When the database is loaded:
+
+1. Query the current version: `SELECT MAX(version) FROM schema_version`
+2. Compare against `CURRENT_VERSION`
+3. If the database version is lower, run "up" migrations sequentially to reach `CURRENT_VERSION`
+4. If the database version is higher, run "down" migrations sequentially to reach `CURRENT_VERSION`
+
+Each migration is executed within a SQLite transaction (managed in Rust code). The transaction
+includes both the migration SQL and the update to `schema_version`, ensuring they succeed or fail
+together.
+
+### Error Handling
+
+If a migration fails:
+
+- The failed migration's transaction is rolled back
+- The database remains at the last successfully applied version
+- An error is returned with details about which migration failed
+
+For example, if migrating from version 0 to version 5 and migration 3 fails, the database remains at
+version 2 (after migrations 1 and 2 succeeded).
+
+### Logging
+
+Migration activity is logged at `debug` level:
+
+- `"Running migration 01 (up)"`
+- `"Running migration 03 (down)"`
+- `"Migration complete, schema now at version 3"`
+
+### Implementation Details
+
+The `Db` struct provides a private method to query the current schema version:
+
+```rust
+async fn schema_version(&self) -> Result<i32> {
+    // SELECT MAX(version) FROM schema_version
+}
+```
+
+The `Db::load()` and `Db::init()` methods handle migration execution:
+
+- `Db::init()` - Creates the database file, bootstraps `schema_version` with version 0, then runs
+  migrations to reach `CURRENT_VERSION`
+- `Db::load()` - Opens an existing database and runs any needed migrations (up or down) to reach
+  `CURRENT_VERSION`
+
 ## Notes and Todos
 
 This describes editing the transactions sheet:

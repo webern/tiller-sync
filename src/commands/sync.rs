@@ -16,7 +16,7 @@ pub async fn sync_down(config: Config) -> Result<()> {
     // TODO: Write to SQLite database
 
     // TODO: Remove this print to stdout when we have implemented writing to SQLite
-    let s = serde_json::to_string_pretty(&tiller_data).unwrap();
+    let s = serde_json::to_string_pretty(&tiller_data)?;
     println!("{s}");
 
     Ok(())

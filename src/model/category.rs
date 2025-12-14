@@ -83,7 +83,7 @@ impl Categories {
 pub struct Category {
     // TODO: make these private again
     pub(crate) category: String,
-    pub(crate) group: String,
+    pub(crate) category_group: String,
     #[serde(rename = "type")]
     pub(crate) _type: String,
     pub(crate) hide_from_reports: String,
@@ -119,7 +119,7 @@ impl Category {
         match CategoryColumn::from_header(header) {
             Ok(col) => match col {
                 CategoryColumn::Category => self.category = value,
-                CategoryColumn::Group => self.group = value,
+                CategoryColumn::Group => self.category_group = value,
                 CategoryColumn::Type => self._type = value,
                 CategoryColumn::HideFromReports => self.hide_from_reports = value,
             },
@@ -177,7 +177,7 @@ pub(super) const _CATEGORY_COL: &str = "category";
 pub(super) const _CATEGORY_IDX: usize = 0;
 
 pub(super) const GROUP_STR: &str = "Group";
-pub(super) const _GROUP_COL: &str = "group";
+pub(super) const _GROUP_COL: &str = "category_group";
 pub(super) const _GROUP_IDX: usize = 1;
 
 pub(super) const TYPE_STR: &str = "Type";

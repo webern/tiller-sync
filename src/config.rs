@@ -25,7 +25,7 @@ const TILLER_SQLITE: &str = "tiller.sqlite";
 /// the path to `$TILLER_HOME` and from there it loads `$TILLER_HOME/config.json`. It provides
 /// paths to other items that are either configurable or are expected in a certain location within
 /// the tiller home directory.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Config {
     root: PathBuf,
     backups: PathBuf,

@@ -30,33 +30,55 @@ See @./docs/DESIGN.md for design and architecture.
 This section is here to help AI agents understand what we have been working on and what we need to
 do next.
 
-Currently, the SQLite storage layer has not been started. We are not ready to begin that work. First
-we are going to get `tiller sync up` and `tiller sync down` working using temporary or in-memory
-persistence. Basically we will the Sheets API side code written first, then turn to SQLite code.
-
 What's Already Built for `tiller sync up`
 
 1. Data Download (sync down) - Complete
 2. Model Layer - Complete
 3. API Layer - Partial
-    - Sheet trait has get(), get_formulas() (implemented) and _put() (stub with todo!())
+    - Sheet trait has get(), get_formulas() (implemented) and `_put()` (stub with todo!())
     - GoogleSheet implements these for real Google Sheets API calls
     - TestSheet provides in-memory test data
     - Tiller trait has get_data() only - no put_data() method yet
 4. OAuth & Config - Complete
+5. Database migrations and initial schema creation
+
+Glossary:
+
+- GENERAL: general steps related to design, quality or other non-specific taks
+- SYNC_DOWN: work related to `tiller sync down` logic
+- SYNC_UP: work related to `tiller sync up` logic
+- BACKUP: work related to backup logic
+- SQL: work related to the SQLite datastore
 
 Next Steps:
 
-- [X] Investigate the existing code base to understand where we left off.
-- [X] Precondition checks - Verify datastore exists with transactions
-- [X] Backup SQLite - Not applicable yet (using in-memory/temp storage) DEFERRED
-- [X] Add `sync-down.*.json` backup logic to `tiller sync down`
-- [X] Download current sheet state - Save to sync-up-pre.*.json backup
-- [ ] Build output data - Convert model objects to Vec<Vec<String>>
-- [ ] Conflict detection - Compare with last sync-down.*.json
-- [ ] Backup Google Sheet - Use Drive API files.copy endpoint
-- [ ] Execute batch clear and write - Clear data ranges, write headers, write data
-- [ ] Verification - Re-fetch row counts
+- [X] GENERAL: Investigate the existing code base to understand where we left off.
+- [X] SYNC_DOWN: Precondition checks - Verify datastore exists with transactions
+- [X] BACKUP: Backup SQLite database
+- [X] BACKUP: Add `sync-down.*.json` backup logic to `tiller sync down`
+- [X] SYNC_UP: Download current sheet state - Save to sync-up-pre.*.json backup
+- [X] SQL: Choose a Rust library for SQLite operations and add it to the project and to `Db`
+- [X] SQL: Create a schema migration design and add it to DESIGN.md
+- [X] SQL: Create an implementation plan for building the SQLite datastore and add the steps to
+  AGENTS.md. The plan should divide up the implementation into 5-10 discrete steps.
+- [X] SQL: Create src/db/migrations/ directory, CURRENT_VERSION constant in db/mod.rs
+- [X] SQL: Implement bootstrap logic (creates schema_version table, inserts version 0)
+- [X] SQL: Write a test of the bootstrap logic
+- [X] SQL: Implement the logic that detects the required migrations and executes them
+- [X] SQL: Create Migration 1, research Tiller documentation and our model structs for table
+  structure
+- [X] SQL: Write tests for the migration system
+- [X] SQL: Wire migration logic into Db::init() - create a shared function that can also be used by
+  load()
+- [X] SQL: Wire migration logic into Db::load()
+- [ ] SQL: STOP HERE: We need to design the interface and logic for Upserting data and querying data
+  with Db
+- [ ] SQL: REPLACE THIS STEP WITH THE IMPLEMENTATION PLAN for upserting and queries
+- [ ] SYNC_UP: Build output data - Convert model objects to `Vec<Vec<String>>`
+- [ ] SYNC_UP: Conflict detection - Compare with last sync-down.*.json
+- [ ] SYNC_UP: Backup Google Sheet - Use Drive API files.copy endpoint
+- [ ] SYNC_UP: Execute batch clear and write - Clear data ranges, write headers, write data
+- [ ] SYNC_UP: Verification - Re-fetch row counts
 
 ## Instruction Imports
 
@@ -71,8 +93,8 @@ wants them added to this instruction file, or to a separate file in `docs/ai`. I
 separate instructions file, then you should create it in `docs/ai` and add an import of it here.
 
 For example, let's say the user wants to add some instructions that are specifically about adding
-Python code to this project. You ask the user, "Do you want these instructions added to the
-this instructions file, or do you want a separate file for these instructions?"
+Python code to this project. You ask the user, "Do you want these instructions added to this
+instructions file, or do you want a separate file for these instructions?"
 
 If the user says they want a separate file, you would then create a file at `docs/ai/PYTHON.md` and
 add a line like the following below:
@@ -81,6 +103,11 @@ add a line like the following below:
 - @./docs/ai/PYTHON.md: Instructions for writing, running and interacting with python code in this
   project.
 ```
+
+## Rust Guidelines
+
+NEVER use `unwrap`, `expect` or any other functions that can explicitly panic in production code (
+it's fine in test code only, NEVER in production code).
 
 ## Build and Development Commands
 
