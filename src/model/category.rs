@@ -75,6 +75,20 @@ impl Categories {
             formulas,
         })
     }
+
+    pub fn data(&self) -> &Vec<Category> {
+        &self.data
+    }
+
+    /// Creates a Categories object from a Vec of Category items.
+    /// Used when loading from the database where we don't have sheet headers.
+    pub(crate) fn _from_data(data: Vec<Category>) -> Self {
+        Self {
+            mapping: Mapping::default(),
+            data,
+            formulas: BTreeMap::new(),
+        }
+    }
 }
 
 /// Represents a single row from the Category sheet.

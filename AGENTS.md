@@ -71,14 +71,251 @@ Next Steps:
 - [X] SQL: Wire migration logic into Db::init() - create a shared function that can also be used by
   load()
 - [X] SQL: Wire migration logic into Db::load()
-- [ ] SQL: STOP HERE: We need to design the interface and logic for Upserting data and querying data
-  with Db
-- [ ] SQL: REPLACE THIS STEP WITH THE IMPLEMENTATION PLAN for upserting and queries
+- [X] SQL Add sheet metadata table to Migration 1
+- [X] SQL Add `original_order` column to tables in Migration 1
+- [X] SQL Add `other_fields` columns to Migration 1
+- [X] SQL Add `formulas` table to Migration 1
+- [X] SQL Change `categories` table to use synthetic primary key in Migration 1
+- [X] SQL TDD: Stub `db.save_tiller_data` and `db.get_tiller_data` functions with `todo!()` function
+  bodies and write TWO basic tests. One for each function. These tests will fail at first (think
+  Red/Green TDD).
+- [X] SQL TDD: Stub `db.insert_transaction`, `db.update_transaction`, and `db.get_transaction`
+  functions with `todo!()` bodies and failing Red/Green tests.
+- [X] SQL TDD: Stub `db.insert_category`, `db.update_category`, and `db.get_category` functions with
+  `todo!()` bodies and failing Red/Green tests.
+- [X] SQL TDD: Stub `db.insert_autocat`, `db.update_autocat`, and `db.get_autocat` functions with
+  `todo!()` bodies and failing Red/Green tests.
+- [X] SQL TDD: Think of and propose more tests that will check nuances of the logic of these
+  functions and write them.
+- [X] SQL: Implement stubbed functions and get the tests to pass.
+
+- [ ] STOP HERE: We need to design the interface and logic for Upserting data and querying data
+  with Db (DESIGN COMPLETE - see "Db Interface Design Decisions" section below)
+
+NO: WE ARE NOT READY FOR THESE YET
+
+- [ ] SYNC_UP: Implement gap detection logic for original_order
 - [ ] SYNC_UP: Build output data - Convert model objects to `Vec<Vec<String>>`
 - [ ] SYNC_UP: Conflict detection - Compare with last sync-down.*.json
 - [ ] SYNC_UP: Backup Google Sheet - Use Drive API files.copy endpoint
 - [ ] SYNC_UP: Execute batch clear and write - Clear data ranges, write headers, write data
 - [ ] SYNC_UP: Verification - Re-fetch row counts
+
+## Db Interface Design Decisions
+
+This section documents design decisions made for the `Db` struct's data operations. Decisions are
+labeled:
+
+- **CHANGE**: Modifies existing code or design
+- **NEW**: Adds to the design without changing existing behavior
+
+### Db Method Signatures
+
+**NEW** - The `Db` struct will expose these public methods for data operations:
+
+```rust
+impl Db {
+    /// Saves data from TillerData into the database.
+    /// - Transactions: upsert (insert new, update existing, delete removed)
+    /// - Categories: delete all, then insert all
+    /// - AutoCat: delete all, then insert all
+    pub async fn save_tiller_data(&self, data: &TillerData) -> Result<()>;
+
+    /// Retrieves all data from the database as TillerData.
+    /// Reconstructs Mapping from sheet_metadata table.
+    pub async fn get_tiller_data(&self) -> Result<TillerData>;
+}
+```
+
+- Affects: `src/db/mod.rs` (`Db` struct)
+- Input/Output type: `TillerData` from `src/model/mod.rs:19-27`
+
+### Transaction Sync Semantics
+
+**NEW** - Transaction sync is a full sync operation:
+
+1. Insert new transactions (by `transaction_id`)
+2. Update existing transactions that have changed
+3. Delete transactions that exist in DB but not in incoming data
+
+This differs from categories/autocat which use simple delete-all + insert-all.
+
+- Affects: `src/db/mod.rs` (new `save_tiller_data` method)
+- Related: `Transaction` struct at `src/model/transaction.rs:94-121`
+
+### Database Transaction Semantics
+
+**NEW** - All sync operations run within a single SQLite transaction with rollback on error. If any
+operation fails, the entire sync is rolled back and the database remains unchanged.
+
+### Schema Changes Required (changes Migration 1)
+
+#### NEW: `sheet_metadata` Table
+
+Stores column ordering and header-to-column mapping for each sheet:
+
+```sql
+CREATE TABLE sheet_metadata
+(
+    sheet       TEXT    NOT NULL, -- 'transactions' | 'categories' | 'autocat'
+    column_name TEXT    NOT NULL, -- snake_case SQLite column name (e.g., 'account_number')
+    header_name TEXT    NOT NULL, -- original Google Sheet header (e.g., 'Account #')
+    "order"     INTEGER NOT NULL, -- position in sheet (0-indexed)
+    PRIMARY KEY (sheet, "order"),
+    UNIQUE (sheet, header_name)
+);
+```
+
+This table stores ALL columns including "other" (unknown) columns, enabling reconstruction of the
+`Mapping` struct from the database.
+
+- Affects: `src/db/migrations/migration_01_up.sql`
+- Related: `Mapping` struct at `src/model/mapping.rs:21-27`
+- Related: DESIGN.md lines 549-559 (Migration Files section)
+
+#### CHANGE: Add `other_fields` Column to Data Tables
+
+Each data table needs a TEXT column to store unknown/custom columns as JSON:
+
+```sql
+ALTER TABLE transactions
+    ADD COLUMN other_fields TEXT;
+ALTER TABLE categories
+    ADD COLUMN other_fields TEXT;
+ALTER TABLE autocat
+    ADD COLUMN other_fields TEXT;
+```
+
+The JSON is keyed by **header name** (not snake_case column name) to match existing behavior in
+`Transaction::set_with_header()` at `src/model/transaction.rs:182-184`:
+
+```rust
+Err(_) => {
+let _ = self.other_fields.insert(header.to_string(), value);
+}
+```
+
+Example JSON: `{"My Custom Column": "some value", "Another Column": "another value"}`
+
+- Affects: `src/db/migrations/migration_01_up.sql`
+- Related: `Transaction.other_fields` at `src/model/transaction.rs:120`
+- Related: `Category.other_fields` at `src/model/category.rs:90`
+- Related: `AutoCat.other_fields` at `src/model/auto_cat.rs:97`
+
+#### NEW: Add `original_order` Column to Data Tables
+
+Each data table needs an INTEGER column to track the original row position from sync down:
+
+```sql
+ALTER TABLE transactions
+    ADD COLUMN original_order INTEGER;
+ALTER TABLE categories
+    ADD COLUMN original_order INTEGER;
+ALTER TABLE autocat
+    ADD COLUMN original_order INTEGER;
+```
+
+- Set during sync down to the row index from the sheet (0-indexed, excluding header)
+- Locally-added rows have NULL
+- Used for formula preservation and deletion detection
+
+#### NEW: `formulas` Table
+
+Stores cell formulas from the Google Sheet, keyed by absolute position:
+
+```sql
+CREATE TABLE formulas
+(
+    sheet   TEXT    NOT NULL, -- 'transactions' | 'categories' | 'autocat'
+    row     INTEGER NOT NULL, -- 0-indexed row (excluding header)
+    col     INTEGER NOT NULL, -- 0-indexed column
+    formula TEXT    NOT NULL, -- the formula string (e.g., '=SUM(A1:A10)')
+    PRIMARY KEY (sheet, row, col)
+);
+```
+
+Formulas are tied to sheet positions, not to row data. During sync up, formulas are written back
+to their original positions when `original_order` values indicate no deletions occurred.
+
+- Affects: `src/db/migrations/migration_01_up.sql`
+- Related: `Transactions.formulas` at `src/model/transaction.rs:17` (BTreeMap<RowCol, String>)
+
+#### CHANGE: Categories Table Primary Key
+
+The categories table uses a synthetic primary key to allow renaming categories:
+
+```sql
+CREATE TABLE categories
+(
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    category          TEXT NOT NULL UNIQUE,
+    category_group    TEXT,
+    type              TEXT,
+    hide_from_reports TEXT
+);
+```
+
+The `category` column has a UNIQUE constraint but is not the primary key. This allows updating
+the category name while maintaining referential integrity via the synthetic `id`.
+
+- Affects: `src/db/migrations/migration_01_up.sql`
+- Related: `Category` struct at `src/model/category.rs`
+
+### Formula Preservation Strategy
+
+Formula preservation is opt-in via the `--preserve-formulas` flag on `tiller sync up` (defaults to
+false). When not set, formulas are ignored entirely.
+
+**During sync down:**
+
+- Each row's `original_order` is set to its row index from the sheet
+- Cell formulas are captured and stored in the `formulas` table
+
+**During sync up with `--preserve-formulas`:**
+
+- Sort order: `original_order ASC NULLS LAST`, then by ID (e.g., `transaction_id`) for determinism
+- New rows (NULL `original_order`) are appended at the end
+- Formulas are written back to their original cell positions
+
+**Deletion detection algorithm:**
+
+1. Query non-NULL `original_order` values, sorted ascending
+2. Iterate expecting sequential values: 0, 1, 2, 3...
+3. If any gap exists (e.g., 0, 1, 3), at least one deletion occurred
+
+**Sync up behavior when `--preserve-formulas` is set:**
+
+| Condition                             | Behavior                                      |
+|---------------------------------------|-----------------------------------------------|
+| No deletions detected                 | Proceed, write formulas to original positions |
+| Deletions detected (gaps in sequence) | ERROR, require `--force` flag                 |
+| `--force` with deletions              | Write values only, skip all formulas          |
+
+- Affects: `src/commands/sync.rs` (sync up logic)
+- Related: `Transactions.formulas` at `src/model/transaction.rs` (BTreeMap<RowCol, String>)
+
+### Existing Code Observations
+
+**Uniqueness enforcement already exists** - The `Mapping::new()` method at
+`src/model/mapping.rs:57-66` already enforces unique headers:
+
+```rust
+if header_map.len() != expected_length {
+return Err(MappingError(String::from("Encountered a duplicate header")));
+}
+```
+
+This satisfies the unique constraint requirement for `sheet_metadata(sheet, header_name)`.
+
+**`count_transactions()` is a stub** - The method at `src/db/mod.rs:85-88` currently returns
+hardcoded 100. This needs to be implemented to return the actual row count.
+
+### Open Questions (Deferred)
+
+The following question was raised but not resolved:
+
+- For `count_transactions()`: Should it count all rows, or only rows with non-NULL `original_order`?
+  (Used for precondition checks like "error if database is empty")
 
 ## Instruction Imports
 

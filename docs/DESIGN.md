@@ -295,6 +295,9 @@ During the `tiller sync down` call, the following happens.
     - Rows will be added to the database for new rows found in the sheets.
     - Rows will be deleted from the database for rows deleted from the sheets.
     - Rows will be updated in the database for rows that have been changed in the sheets.
+    - Each row's `original_order` is set to its 0-indexed row position from the sheet.
+- Cell formulas are captured and stored in the `formulas` table for potential preservation
+  during sync up.
 
 ### Up
 
@@ -349,7 +352,8 @@ dependencies on row/column ordering and provides predictable, repeatable results
         - Build header row with exact column names expected by Tiller
         - Build data rows in consistent column order
         - Ensure calculated fields are populated (Month, Week for transactions)
-        - Sort rows by a predictable field (e.g., Date for transactions, then transaction_id)
+        - Sort rows by `original_order ASC NULLS LAST`, then by primary key for determinism
+        - Locally-added rows (NULL `original_order`) are appended at the end
 
 6. **Backup Google Sheet**
     - Use the Google Drive API `files.copy` endpoint to create a full copy of the spreadsheet
@@ -385,7 +389,22 @@ dependencies on row/column ordering and provides predictable, repeatable results
     - Log all operations to stderr at INFO level
     - On failure, provide clear message about which backup to restore and hint at how to do it.
 
-**Implementation with sheets crate:**
+#### Formula Preservation
+
+Formula preservation is opt-in via the `--preserve-formulas` flag (defaults to false).
+
+When `--preserve-formulas` is enabled, formulas captured during sync down are written back to
+their original cell positions during sync up. This relies on `original_order` to maintain row
+alignment.
+
+**Deletion detection:** Gaps in the `original_order` sequence (e.g., 0, 1, 3) indicate deleted
+rows. When deletions are detected, formula positions have shifted and cannot be safely preserved.
+
+- No deletions detected → proceed, write formulas to original positions
+- Deletions detected (gaps in sequence) → error, require `--force` flag
+- `--force` with deletions → write values only, skip all formulas
+
+When `--preserve-formulas` is not set, formulas are ignored entirely.
 
 #### Safety Measures
 
@@ -473,57 +492,36 @@ struct TransactionId {
 
 ## Database Schema
 
-### Transactions Table
+The SQLite database contains the following tables. See `src/db/migrations/` for exact DDL.
 
-The Transactions table stores all financial transactions synced from Tiller. Column descriptions are
-from the [Tiller documentation](https://help.tiller.com/en/articles/432681).
+### Data Tables
 
-| Column Name        | SQLite Type      | Description                                                           |
-|--------------------|------------------|-----------------------------------------------------------------------| 
-| `transaction_id`   | TEXT PRIMARY KEY | Unique Tiller-assigned identifier (or local- prefixed UUID)           |
-| `date`             | TEXT             | Transaction posted or occurrence date (ISO 8601: YYYY-MM-DD)          |
-| `description`      | TEXT             | Cleaned merchant/transaction details                                  |
-| `amount`           | NUMERIC          | Transaction value; positive for income/credits, negative for expenses |
-| `account`          | TEXT             | Account name from bank or user-assigned nickname                      |
-| `account_number`   | TEXT             | Last four digits of account number (format: xxxx####)                 |
-| `institution`      | TEXT             | Financial institution name                                            |
-| `month`            | TEXT             | First day of transaction month for reporting (YYYY-MM-DD)             |
-| `week`             | TEXT             | Sunday of transaction week for analysis (YYYY-MM-DD)                  |
-| `full_description` | TEXT             | Unprocessed merchant data from bank                                   |
-| `account_id`       | TEXT             | Unique account identifier for support                                 |
-| `check_number`     | TEXT             | Check identifier when available                                       |
-| `date_added`       | TEXT             | Spreadsheet entry date (YYYY-MM-DD)                                   |
-| `merchant_name`    | TEXT             | Normalized merchant identifier across varied descriptions             |
-| `category_hint`    | TEXT             | Data provider's category suggestion                                   |
-| `category`         | TEXT             | Manual transaction categorization (user-added)                        |
-| `note`             | TEXT             | User annotations for specific transactions                            |
-| `tags`             | TEXT             | Additional transaction classification layer                           |
+**transactions** - Financial transactions from the Tiller Transactions sheet.
+- Primary key: `transaction_id` (Tiller-assigned or `user-` prefixed local UUID)
+- Indexed on: `date`, `account`, `category`, `description`
 
-**Constraints:**
+**categories** - Budget categories from the Tiller Categories sheet.
+- Primary key: `id` (synthetic auto-increment)
+- Unique constraint on `category` (allows renaming categories)
 
-- Primary key: `transaction_id`
-- All date fields stored as TEXT in ISO 8601 format (YYYY-MM-DD)
-- `amount` uses NUMERIC type for decimal precision
-- Only `transaction_id`, `date`, `description`, `amount`, `account`, `account_number`,
-  `institution`, and `account_id` are considered required (NOT NULL)
-- All other fields are optional (nullable)
+**autocat** - Automatic categorization rules from the Tiller AutoCat sheet.
+- Primary key: `id` (synthetic auto-increment)
 
-**Indexes:**
+All three data tables include:
+- `original_order INTEGER` - Row position from last sync down (0-indexed); NULL for locally-added
+  rows. Used for formula preservation.
+- `other_fields TEXT` - JSON object storing unknown/custom columns keyed by original header name.
 
-```sql
-CREATE INDEX idx_transactions_date ON transactions (date);
-CREATE INDEX idx_transactions_account ON transactions (account);
-CREATE INDEX idx_transactions_category ON transactions (category);
-CREATE INDEX idx_transactions_description ON transactions (description);
-```
+### Metadata Tables
 
-**Notes:**
+**sheet_metadata** - Column ordering and header mapping per sheet.
+- Primary key: `(sheet, "order")`
+- Unique: `(sheet, header_name)`
+- Stores all columns including custom ones, enabling round-trip preservation of sheet structure.
 
-- Additional columns added to Tiller after initial sync will only populate for new transactions, not
-  retroactively
-- The sign convention for `amount` is: positive = income/credits, negative = expenses
-- `Month` and `Week` fields are automatically calculated by Tiller for reporting/grouping purposes.
-  If we add rows, we should calculate and populate them.
+**formulas** - Cell formulas from the Google Sheet.
+- Primary key: `(sheet, row, col)`
+- Formulas are tied to sheet positions, not row data. See Formula Preservation.
 
 ## Schema Migrations
 
@@ -614,6 +612,19 @@ The `Db::load()` and `Db::init()` methods handle migration execution:
   migrations to reach `CURRENT_VERSION`
 - `Db::load()` - Opens an existing database and runs any needed migrations (up or down) to reach
   `CURRENT_VERSION`
+
+## Db Data Interface
+
+The `Db` struct exposes `save_tiller_data` and `get_tiller_data` methods for syncing data
+with the database.
+
+**Sync semantics for `save_tiller_data`:**
+
+- **Transactions**: Upsert - insert new, update existing, delete rows not in incoming data
+- **Categories**: Delete all, then insert all
+- **AutoCat**: Delete all, then insert all
+
+All operations run within a single SQLite transaction with rollback on error.
 
 ## Notes and Todos
 

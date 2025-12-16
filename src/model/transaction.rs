@@ -81,6 +81,16 @@ impl Transactions {
         &self.data
     }
 
+    /// Creates a Transactions object from a Vec of Transaction items.
+    /// Used when loading from the database where we don't have sheet headers.
+    pub(crate) fn _from_data(data: Vec<Transaction>) -> Self {
+        Self {
+            mapping: Mapping::default(),
+            data,
+            formulas: BTreeMap::new(),
+        }
+    }
+
     pub(crate) fn _mapping(&self) -> &Mapping {
         &self.mapping
     }

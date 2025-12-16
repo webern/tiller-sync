@@ -13,6 +13,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Implement `tiller init` [#9]
 - Implement OAuth [#5], [#6], [#7], [#8], [#10]
 - Implement Sheets interactions [#11], [#13]
+- Implement the Database Layer [#14], [#15]
 
 <!-- @formatter:off -->
 
@@ -31,5 +32,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#10]: https://github.com/webern/tiller-sync/pull/10
 [#11]: https://github.com/webern/tiller-sync/pull/11
 [#13]: https://github.com/webern/tiller-sync/pull/13
+[#14]: https://github.com/webern/tiller-sync/pull/14
+[#15]: https://github.com/webern/tiller-sync/pull/15
 
 <!-- Issues -->

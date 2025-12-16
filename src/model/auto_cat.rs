@@ -76,6 +76,20 @@ impl AutoCats {
             formulas,
         })
     }
+
+    pub fn data(&self) -> &Vec<AutoCat> {
+        &self.data
+    }
+
+    /// Creates an AutoCats object from a Vec of AutoCat items.
+    /// Used when loading from the database where we don't have sheet headers.
+    pub(crate) fn _from_data(data: Vec<AutoCat>) -> Self {
+        Self {
+            mapping: Mapping::default(),
+            data,
+            formulas: BTreeMap::new(),
+        }
+    }
 }
 
 /// Represents a single row from the AutoCat sheet.
