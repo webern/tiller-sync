@@ -21,7 +21,9 @@ CREATE TABLE transactions (
     tags             TEXT,
     categorized_date TEXT,
     statement        TEXT,
-    metadata         TEXT
+    metadata         TEXT,
+    original_order   INTEGER,
+    other_fields     TEXT
 );
 
 CREATE INDEX idx_transactions_date ON transactions (date);
@@ -30,10 +32,13 @@ CREATE INDEX idx_transactions_category ON transactions (category);
 CREATE INDEX idx_transactions_description ON transactions (description);
 
 CREATE TABLE categories (
-    category          TEXT PRIMARY KEY,
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    category          TEXT NOT NULL UNIQUE,
     category_group    TEXT,
     type              TEXT,
-    hide_from_reports TEXT
+    hide_from_reports TEXT,
+    original_order    INTEGER,
+    other_fields      TEXT
 );
 
 CREATE TABLE autocat (
@@ -49,5 +54,24 @@ CREATE TABLE autocat (
     description_equals        TEXT,
     description_full          TEXT,
     full_description_contains TEXT,
-    amount_contains           TEXT
+    amount_contains           TEXT,
+    original_order            INTEGER,
+    other_fields              TEXT
+);
+
+CREATE TABLE sheet_metadata (
+    sheet       TEXT    NOT NULL,
+    column_name TEXT    NOT NULL,
+    header_name TEXT    NOT NULL,
+    "order"     INTEGER NOT NULL,
+    PRIMARY KEY (sheet, "order"),
+    UNIQUE (sheet, header_name)
+);
+
+CREATE TABLE formulas (
+    sheet   TEXT    NOT NULL,
+    row     INTEGER NOT NULL,
+    col     INTEGER NOT NULL,
+    formula TEXT    NOT NULL,
+    PRIMARY KEY (sheet, row, col)
 );

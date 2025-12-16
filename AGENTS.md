@@ -71,23 +71,23 @@ Next Steps:
 - [X] SQL: Wire migration logic into Db::init() - create a shared function that can also be used by
   load()
 - [X] SQL: Wire migration logic into Db::load()
-- [ ] SQL Add sheet metadata table to Migration 1
-- [ ] SQL Add `original_order` column to tables in Migration 1
-- [ ] SQL Add `other_fields` columns to Migration 1
-- [ ] SQL Add `formulas` table to Migration 1
-- [ ] SQL Change `categories` table to use synthetic primary key in Migration 1
-- [ ] SQL TDD: Stub `db.save_tiller_data` and `db.get_tiller_data` functions with `todo!()` function
+- [X] SQL Add sheet metadata table to Migration 1
+- [X] SQL Add `original_order` column to tables in Migration 1
+- [X] SQL Add `other_fields` columns to Migration 1
+- [X] SQL Add `formulas` table to Migration 1
+- [X] SQL Change `categories` table to use synthetic primary key in Migration 1
+- [X] SQL TDD: Stub `db.save_tiller_data` and `db.get_tiller_data` functions with `todo!()` function
   bodies and write TWO basic tests. One for each function. These tests will fail at first (think
   Red/Green TDD).
-- [ ] SQL TDD: Stub `db.insert_transaction`, `db.update_transaction`, and `db.get_transaction`
+- [X] SQL TDD: Stub `db.insert_transaction`, `db.update_transaction`, and `db.get_transaction`
   functions with `todo!()` bodies and failing Red/Green tests.
-- [ ] SQL TDD: Stub `db.insert_category`, `db.update_category`, and `db.get_category` functions with
+- [X] SQL TDD: Stub `db.insert_category`, `db.update_category`, and `db.get_category` functions with
   `todo!()` bodies and failing Red/Green tests.
-- [ ] SQL TDD: Stub `db.insert_autocat`, `db.update_autocat`, and `db.get_autocat` functions with
+- [X] SQL TDD: Stub `db.insert_autocat`, `db.update_autocat`, and `db.get_autocat` functions with
   `todo!()` bodies and failing Red/Green tests.
-- [ ] SQL TDD: Think of and propose more tests that will check nuances of the logic of these
+- [X] SQL TDD: Think of and propose more tests that will check nuances of the logic of these
   functions and write them.
-- [ ] SQL: Implement stubbed functions and get the tests to pass.
+- [X] SQL: Implement stubbed functions and get the tests to pass.
 
 - [ ] STOP HERE: We need to design the interface and logic for Upserting data and querying data
   with Db (DESIGN COMPLETE - see "Db Interface Design Decisions" section below)
