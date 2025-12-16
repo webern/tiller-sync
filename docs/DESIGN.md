@@ -2,8 +2,9 @@
 
 The tiller app provides two main modes of operation:
 
-1. CLI based: one for syncing data between a local datastore and the user's Tiller Google sheet
-2. MCP interface so that it can be used by an AI agent.
+1. CLI based: for syncing data between a local datastore and the user's Tiller Google sheet from the
+   command line
+2. MCP interface: so that it can be used by an AI agent.
 
 ### Design Principles
 
@@ -155,7 +156,7 @@ The structure of the local directory will look like this:
 
 ```
 ├── .backups
-│   ├── download.2025-11-09-001.json
+│   ├── sync-down.2025-11-09-001.json
 │   ├── tiller.sqlite.2025-11-08-001
 │   ├── tiller.sqlite.2025-11-09-001
 │   └── tiller.sqlite.2025-11-09-002
@@ -167,9 +168,6 @@ The structure of the local directory will look like this:
 ```
 
 Each time a sync occurs, backups of the SQL Lite database and Google sheet are created.
-
-- TODO: The exact timing and nature of these backups is yet to be determined.
-- TODO: I have concerns about corrupting the Tiller Google Sheet
 
 ## Configuration
 
@@ -225,12 +223,12 @@ The implementation uses:
 **Why manual OAuth implementation:**
 
 Historical Note: The problem with `yup-oauth2` is that it would automatically enter the interactive
-workflow if there was any problem with authentication or missing scopes, etc. Claude and I could
-*not* find a reasonable way to prevent this and I do not want this happening during CLI commands
-that are expected to be non-interactive. Furthermore, the `google-sheets4` crate was deeply coupled
-to `yup-oauth2`.
+workflow if there was any problem with authentication or missing scopes, etc. I could *not* find a
+reasonable way to prevent this and I do not want this happening during CLI commands that are
+expected to be non-interactive. Furthermore, the `google-sheets4` crate was deeply coupled to
+`yup-oauth2`.
 
-Thus: we decided to use `oauth2` and `sheets`.
+Thus: I decided to use `oauth2` and `sheets`.
 
 ### Credential Files
 
@@ -302,18 +300,53 @@ During the `tiller sync down` call, the following happens.
 ### Up
 
 The `tiller sync up` command synchronizes local changes from the SQLite database to the Google
-Sheet. This operation requires careful design to prevent data corruption given the constraints of
-the Google Sheets API.
+Sheet. This operation requires careful design to reduce accidental data corruption incidents.
 
-#### Design Constraints
+#### Formula Preservation
 
-1. **No Optimistic Locking**: The Google Sheets API does not provide built-in mechanisms for
-   conditional updates or optimistic concurrency control
-2. **No Atomic Transactions**: Multiple operations cannot be grouped into an atomic transaction
-3. **Structure Instability**: Users can reorder columns or sort rows at any time
-4. **Concurrent Modifications**: The sheet could be edited during our sync operation
-5. **Range-Based Updates**: The API addresses cells using `A1` notation (e.g.,
-   `Transactions!A2:Z100`)
+Formulas in the original data present a challenge. Our behavior around preserving these is
+necessarily somewhat complicated. Formula handling during `tiller sync up` is controlled by the
+`--formulas` argument:
+
+```
+--formulas [unknown|preserve|ignore]
+```
+
+- **`unknown`** (default): If formulas exist in the database, error with a message instructing
+  the user to explicitly choose `--formulas preserve` or `--formulas ignore`. If no formulas
+  exist, proceed normally.
+- **`preserve`**: Write formulas back to their original cell positions during sync up. This
+  relies on `original_order` to maintain row alignment.
+- **`ignore`**: Skip all formulas entirely; only write values.
+
+**Deletion detection:** Gaps in the `original_order` sequence (e.g., 0, 1, 3) indicate deleted
+rows. When deletions are detected, formula positions have shifted and they may not function
+correctly when we put them back.
+
+**Sync up behavior by `--formulas` value:**
+
+| `--formulas` | Formulas Exist | Deletions Detected | Behavior                                      |
+|--------------|----------------|--------------------|-----------------------------------------------|
+| `unknown`    | No             | N/A                | Proceed normally                              |
+| `unknown`    | Yes            | N/A                | ERROR: must specify `preserve` or `ignore`    |
+| `ignore`     | Any            | Any                | Write values only, skip all formulas          |
+| `preserve`   | Any            | No                 | Proceed, write formulas to original positions |
+| `preserve`   | Any            | Yes (gaps)         | ERROR, require `--force` flag                 |
+| `preserve`   | Any            | Yes + `--force`    | Write formulas to original positions (forced) |
+
+#### Safety Measures
+
+1. **Always backup before syncing** - Backup the data to `sync-up-pre.YYYY-MM-DD-NNN.json` and also
+   clone the Google sheet.
+2. **Conflict detection** - Warn if sheet was modified since last download
+3. **Explicit formula handling** - A `--formulas` argument is required to specify formula
+   preservation behavior
+4. **`--force` flag** - Required to overwrite Google sheet in the presence of detected conflicts or
+   formulas that may be corrupted
+5. **`--dry-run` flag** - Preview what would be changed without actually syncing
+6. **Consistent column order** - Always write headers explicitly to control column positions
+7. **Verification** - Confirm write succeeded by checking row counts
+8. **Comprehensive logging** - All operations logged to stderr for debugging
 
 #### Strategy: Clear and Replace with Verification
 
@@ -338,7 +371,7 @@ dependencies on row/column ordering and provides predictable, repeatable results
     - This serves as a snapshot of what we're about to overwrite
     - Delete the oldest `sync-up-pre` snapshot if more than `backup_copies` exist
 
-4. **Conflict Detection (Optional but Recommended)**
+4. **Conflict Detection**
     - Compare downloaded sheet data with most recent `sync-down.*.json` backup
     - If differences detected, warn user: "Sheet has been modified since last sync down"
     - Count differences: `N transactions added, M modified, P deleted since last download`
@@ -346,23 +379,45 @@ dependencies on row/column ordering and provides predictable, repeatable results
       overwrite"
     - If `--force` not provided, abort sync
 
-5. **Build Output Data**
+5. **Formula Safety Checks**
+    - Query the `formulas` table to check if any formulas exist
+    - If `--formulas unknown` (default) and formulas exist:
+        - Error: "Formulas detected in database. Use `--formulas preserve` or `--formulas ignore`"
+    - If `--formulas preserve`:
+        - Run gap detection on `original_order` (see step 5a)
+        - If gaps detected and `--force` not provided:
+            - Error: "Row deletions detected. Formula positions may be corrupted. Use `--force` to
+              proceed anyway, or use `--formulas ignore`"
+    - If `--formulas ignore`: proceed without formula handling
+
+    **Step 5a: Gap Detection Algorithm**
+    - For each sheet (transactions, categories, autocat):
+        - Query: `SELECT original_order FROM {table} WHERE original_order IS NOT NULL ORDER BY
+          original_order ASC`
+        - Iterate through results expecting sequential values: 0, 1, 2, 3...
+        - If any gap exists (e.g., 0, 1, 3), record that deletions occurred for this sheet
+    - Return the set of sheets with detected deletions
+
+6. **Build Output Data**
     - For each tab (Transactions, Categories, AutoCat):
         - Query all rows from corresponding SQLite table
-        - Build header row with exact column names expected by Tiller
-        - Build data rows in consistent column order
+        - Build header row from `sheet_metadata` table (preserves original column order and names)
+        - Build data rows in consistent column order matching the headers
         - Ensure calculated fields are populated (Month, Week for transactions)
         - Sort rows by `original_order ASC NULLS LAST`, then by primary key for determinism
         - Locally-added rows (NULL `original_order`) are appended at the end
+    - If `--formulas preserve`:
+        - Query formulas from `formulas` table for each sheet
+        - Build a map of (row, col) -> formula for use during write
 
-6. **Backup Google Sheet**
+7. **Backup Google Sheet**
     - Use the Google Drive API `files.copy` endpoint to create a full copy of the spreadsheet
     - Set the copy's name to `<original-sheet-name>-backup-YYYY-MM-DD-NNN`
     - This requires the `drive.file` scope
     - Store the backup file ID in the sync log for potential recovery
     - Consider: delete old backup copies from Drive if more than `backup_copies` exist
 
-7. **Execute Batch Clear and Write**
+8. **Execute Batch Clear and Write**
     - Using `spreadsheets().values_batch_update()` for efficiency:
         - **Operation 1**: Clear each tab's data range (preserve sheet structure, delete all rows
           except header)
@@ -373,48 +428,26 @@ dependencies on row/column ordering and provides predictable, repeatable results
             - Transactions: `"Transactions!A1:ZZ1"`
             - Categories: `"Categories!A1:ZZ1"`
             - AutoCat: `"AutoCat!A1:ZZ1"`
-        - **Operation 3**: Write all data rows
+        - **Operation 3**: Write all data rows (values only)
             - Transactions: `"Transactions!A2:ZZ"` (dynamic based on row count)
             - Categories: `"Categories!A2:ZZ"`
             - AutoCat: `"AutoCat!A2:ZZ"`
+        - **Operation 4** (only if `--formulas preserve`): Write formulas to original positions
+            - For each formula in the map, write to cell at (row + 2, col + 1) in A1 notation
+            - Row offset of 2 accounts for 1-indexed sheets plus header row
+            - Use `ValueInputOption::UserEntered` so formulas are interpreted
     - Use `ValueInputOption::UserEntered` to allow Sheets to parse dates/numbers/formulas
 
-8. **Verification**
+9. **Verification**
     - Re-fetch row counts from each tab
     - Verify counts match what we wrote
     - Log summary: `"Synced N transactions, M categories, P autocat rules to sheet"`
+    - If `--formulas preserve`: log count of formulas written per sheet
 
-9. **Error Handling**
+10. **Error Handling**
     - If any operation fails, the backup files allow manual recovery
     - Log all operations to stderr at INFO level
     - On failure, provide clear message about which backup to restore and hint at how to do it.
-
-#### Formula Preservation
-
-Formula preservation is opt-in via the `--preserve-formulas` flag (defaults to false).
-
-When `--preserve-formulas` is enabled, formulas captured during sync down are written back to
-their original cell positions during sync up. This relies on `original_order` to maintain row
-alignment.
-
-**Deletion detection:** Gaps in the `original_order` sequence (e.g., 0, 1, 3) indicate deleted
-rows. When deletions are detected, formula positions have shifted and cannot be safely preserved.
-
-- No deletions detected → proceed, write formulas to original positions
-- Deletions detected (gaps in sequence) → error, require `--force` flag
-- `--force` with deletions → write values only, skip all formulas
-
-When `--preserve-formulas` is not set, formulas are ignored entirely.
-
-#### Safety Measures
-
-1. **Always backup before syncing** - Multiple recovery points available
-2. **Conflict detection** - Warn if sheet was modified since last download
-3. **`--force` flag** - Required to overwrite Google sheet in the presence of detected conflicts
-4. **`--dry-run` flag** - Preview what would be changed without actually syncing
-5. **Consistent column order** - Always write headers explicitly to control column positions
-6. **Verification** - Confirm write succeeded by checking row counts
-7. **Comprehensive logging** - All operations logged to stderr for debugging
 
 #### Future Enhancements
 
@@ -497,17 +530,21 @@ The SQLite database contains the following tables. See `src/db/migrations/` for 
 ### Data Tables
 
 **transactions** - Financial transactions from the Tiller Transactions sheet.
+
 - Primary key: `transaction_id` (Tiller-assigned or `user-` prefixed local UUID)
 - Indexed on: `date`, `account`, `category`, `description`
 
 **categories** - Budget categories from the Tiller Categories sheet.
+
 - Primary key: `id` (synthetic auto-increment)
 - Unique constraint on `category` (allows renaming categories)
 
 **autocat** - Automatic categorization rules from the Tiller AutoCat sheet.
+
 - Primary key: `id` (synthetic auto-increment)
 
 All three data tables include:
+
 - `original_order INTEGER` - Row position from last sync down (0-indexed); NULL for locally-added
   rows. Used for formula preservation.
 - `other_fields TEXT` - JSON object storing unknown/custom columns keyed by original header name.
@@ -515,11 +552,13 @@ All three data tables include:
 ### Metadata Tables
 
 **sheet_metadata** - Column ordering and header mapping per sheet.
+
 - Primary key: `(sheet, "order")`
 - Unique: `(sheet, header_name)`
 - Stores all columns including custom ones, enabling round-trip preservation of sheet structure.
 
 **formulas** - Cell formulas from the Google Sheet.
+
 - Primary key: `(sheet, row, col)`
 - Formulas are tied to sheet positions, not row data. See Formula Preservation.
 
@@ -532,7 +571,8 @@ The SQLite database uses a version-based migration system to manage schema chang
 A `schema_version` table tracks the current database schema version:
 
 ```sql
-CREATE TABLE schema_version (
+CREATE TABLE schema_version
+(
     version INTEGER NOT NULL
 );
 ```
