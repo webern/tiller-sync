@@ -94,12 +94,12 @@ Next Steps:
   functions and write them.
 - [X] SQL: Implement stubbed functions and get the tests to pass.
 - [X] SYNC_UP: Update the algorithm in DESIGN.md
-- [ ] SYNC_UP: Improve the flexibility of the `TestSheet` struct. We will be using this extensively
+- [X] SYNC_UP: Improve the flexibility of the `TestSheet` struct. We will be using this extensively
   to test the behavior of the `sync up` algorithm. Figure out what we are going to need from the
   testing mock and implement those extensions.
-- [ ] SYNC_UP: Wire `sync down` to begin actually using the datastore, and stop printing its results
+- [X] SYNC_UP: Wire `sync down` to begin actually using the datastore, and stop printing its results
   to stdout.
-- [ ] SYNC_UP: Add a basic test to the `sync.rs` file for `sync_down` using the `TestSheet` mock.
+- [X] SYNC_UP: Add a basic test to the `sync.rs` file for `sync_down` using the `TestSheet` mock.
 - [ ] SYNC_UP: Add extensive, failing tests (RED/GREEN TDD style) to `sync.rs` for the `sync_up`
   command. As you encounter the need for functions that do not exist, stub them with `todo!()` as
   their function body. Test the `sync up` algorithm thoroughly in these tests using `TestSheet`.

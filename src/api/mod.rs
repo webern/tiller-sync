@@ -45,6 +45,9 @@ pub enum Mode {
 impl Mode {
     /// Check for the environment variable `TILLER_SYNC_IN_TEST_MODE`. If it exists, returns
     /// `Mode::Testing`, if not, returns `Mode::Google`.
+    //
+    // The idea here is that the `Mode` should be pushed down from `main.rs`. We should never used
+    // from_env() in tests. The only place it should ever be used is in `main.rs`.
     pub fn from_env() -> Self {
         match std::env::var(MODE_ENV) {
             Err(VarError::NotPresent) => Self::Google,
@@ -53,14 +56,20 @@ impl Mode {
     }
 }
 
-/// Construct a `Sheet` object and select the `Mode`: either testing or live. Your can pass
-/// `Mode::from_env()` for the mode parameter to let the application choose live or testing mode
-/// based on the presence or absence of the `TILLER_SYNC_IN_TEST_MODE` environment variable.
-pub async fn sheet(conf: Config, token_provider: TokenProvider, m: Mode) -> Result<Box<dyn Sheet>> {
-    match m {
-        Mode::Google => Ok(Box::new(GoogleSheet::new(conf, token_provider).await?)),
-        Mode::Testing => Ok(Box::new(TestSheet::default())),
-    }
+/// Construct a `Sheet` object based on `mode`.
+/// - For `Mode::Google`: creates a token provider and constructs a Google sheet object
+/// - For `Mode::Test`: does not construct a token provider and constructs a Test sheet object
+pub async fn sheet(config: Config, mode: Mode) -> Result<Box<dyn Sheet>> {
+    let sheet_client: Box<dyn Sheet> = match mode {
+        Mode::Google => {
+            let token_provider =
+                TokenProvider::load(config.client_secret_path(), config.token_path()).await?;
+            Box::new(GoogleSheet::new(config.clone(), token_provider).await?)
+        }
+        Mode::Testing => Box::new(TestSheet::default()),
+    };
+
+    Ok(sheet_client)
 }
 
 /// Construct a `Tiller` client, which will use `sheet` to communicate with Google sheets (or, in
