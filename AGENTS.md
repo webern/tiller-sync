@@ -45,7 +45,6 @@ What's Already Built for `tiller sync up`
     - Tiller trait has get_data() only - no put_data() method yet
 4. OAuth & Config - Complete
 5. Database migrations and initial schema creation
-5. Database migrations and initial schema creation
 
 Glossary:
 

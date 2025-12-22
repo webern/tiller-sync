@@ -343,10 +343,9 @@ correctly when we put them back.
    preservation behavior
 4. **`--force` flag** - Required to overwrite Google sheet in the presence of detected conflicts or
    formulas that may be corrupted
-5. **`--dry-run` flag** - Preview what would be changed without actually syncing
-6. **Consistent column order** - Always write headers explicitly to control column positions
-7. **Verification** - Confirm write succeeded by checking row counts
-8. **Comprehensive logging** - All operations logged to stderr for debugging
+5. **Consistent column order** - Always write headers explicitly to control column positions
+6. **Verification** - Confirm write succeeded by checking row counts
+7. **Comprehensive logging** - All operations logged to stderr for debugging
 
 #### Strategy: Clear and Replace with Verification
 
@@ -357,97 +356,97 @@ dependencies on row/column ordering and provides predictable, repeatable results
 **Algorithm:**
 
 1. **Precondition Checks**
-    - If the datastore does not exist, error with message: "Run `tiller sync down` first"
-    - If the SQLite database is empty of transactions, error with message: "Run `tiller sync down`
-      first"
+    - a. If the datastore does not exist, error with message: "Run `tiller sync down` first"
+    - b. If the SQLite database is empty of transactions, error with message: "Run `tiller sync
+      down` first"
 
-2. **Backup SQLite**
-    - Create backup of SQLite database with timestamp (e.g., `tiller.sqlite.2025-11-21-003`)
-    - Delete the oldest backups if more than `backup_copies` exist
+2. **Download Current Sheet State and back it up**
+    - a. Fetch all three tabs: Transactions, Categories, AutoCat
+    - b. Save to backup file: `$TILLER_HOME/.backups/sync-up-pre.YYYY-MM-DD-NNN.json`
+    - c. This serves as a snapshot of what we're about to overwrite
+    - d. Delete the oldest `sync-up-pre` snapshot if more than `backup_copies` exist
 
-3. **Download Current Sheet State**
-    - Fetch all three tabs: Transactions, Categories, AutoCat
-    - Save to backup file: `$TILLER_HOME/.backups/sync-up-pre.YYYY-MM-DD-NNN.json`
-    - This serves as a snapshot of what we're about to overwrite
-    - Delete the oldest `sync-up-pre` snapshot if more than `backup_copies` exist
-
-4. **Conflict Detection**
-    - Compare downloaded sheet data with most recent `sync-down.*.json` backup
-    - If differences detected, warn user: "Sheet has been modified since last sync down"
-    - Count differences: `N transactions added, M modified, P deleted since last download`
-    - Recommend: "Merge changes manually and run 'tiller sync down' first, or use --force to
+3. **Conflict Detection**
+    - a. Find most recent `sync-down.*.json` backup
+    - b. If no backup exists and `--force` not provided:
+        - Error: "No sync-down backup found. Run 'tiller sync down' first, or use --force to
+          proceed without conflict detection"
+    - c. If no backup exists and `--force` provided: skip conflict detection, proceed
+    - d. Compare downloaded sheet data with the backup
+    - e. If differences detected, warn user: "Sheet has been modified since last sync down"
+    - f. Count differences: `N transactions added, M modified, P deleted since last download`
+    - g. Recommend: "Merge changes manually and run 'tiller sync down' first, or use --force to
       overwrite"
-    - If `--force` not provided, abort sync
+    - h. If `--force` not provided, abort sync
 
-5. **Formula Safety Checks**
-    - Query the `formulas` table to check if any formulas exist
-    - If `--formulas unknown` (default) and formulas exist:
-        - Error: "Formulas detected in database. Use `--formulas preserve` or `--formulas ignore`"
-    - If `--formulas preserve`:
-        - Run gap detection on `original_order` (see step 5a)
-        - If gaps detected and `--force` not provided:
-            - Error: "Row deletions detected. Formula positions may be corrupted. Use `--force` to
-              proceed anyway, or use `--formulas ignore`"
-    - If `--formulas ignore`: proceed without formula handling
-
-    **Step 5a: Gap Detection Algorithm**
-    - For each sheet (transactions, categories, autocat):
-        - Query: `SELECT original_order FROM {table} WHERE original_order IS NOT NULL ORDER BY
-          original_order ASC`
-        - Iterate through results expecting sequential values: 0, 1, 2, 3...
-        - If any gap exists (e.g., 0, 1, 3), record that deletions occurred for this sheet
-    - Return the set of sheets with detected deletions
-
-6. **Build Output Data**
-    - For each tab (Transactions, Categories, AutoCat):
+4. **Build Output Data**
+    - a. For each tab (Transactions, Categories, AutoCat):
         - Query all rows from corresponding SQLite table
         - Build header row from `sheet_metadata` table (preserves original column order and names)
         - Build data rows in consistent column order matching the headers
         - Ensure calculated fields are populated (Month, Week for transactions)
         - Sort rows by `original_order ASC NULLS LAST`, then by primary key for determinism
         - Locally-added rows (NULL `original_order`) are appended at the end
-    - If `--formulas preserve`:
-        - Query formulas from `formulas` table for each sheet
-        - Build a map of (row, col) -> formula for use during write
+    - b. When deserializing to `TillerData`, always query formulas from the `formulas` table and
+      include them in the deserialized data, regardless of `--formulas` mode. Build a map of
+      (row, col) -> formula. The `--formulas` flag determines what we do with these formulas
+      in subsequent steps, not whether we load them.
+
+5. **Formula Safety Checks**: Having already deserialized to `TillerData`, the following steps occur
+   in the `model` and `commands` layers.
+    - a. If `--formulas unknown` (default) and formulas exist:
+        - Error: "Formulas detected in database. Use `--formulas preserve` or `--formulas ignore`"
+    - b. If `--formulas preserve`:
+        - Run gap detection on `original_order` of the data now held in `TillerData`.
+        - If gaps detected and `--force` not provided:
+            - Error: "Row deletions detected. Formula positions may be corrupted. Use `--force` to
+              proceed anyway, or use `--formulas ignore`"
+        - If gaps detected and `--force` is provided, use `warn!` to make note of this and
+          proceed.
+    - c. If `--formulas ignore`: proceed without formula handling
+
+6. **Backup SQLite**
+    - a. Create backup of SQLite database with timestamp (e.g., `tiller.sqlite.2025-11-21-003`)
+    - b. Delete the oldest backups if more than `backup_copies` exist
 
 7. **Backup Google Sheet**
-    - Use the Google Drive API `files.copy` endpoint to create a full copy of the spreadsheet
-    - Set the copy's name to `<original-sheet-name>-backup-YYYY-MM-DD-NNN`
-    - This requires the `drive.file` scope
-    - Store the backup file ID in the sync log for potential recovery
-    - Consider: delete old backup copies from Drive if more than `backup_copies` exist
+    - a. Use the Google Drive API `files.copy` endpoint to create a full copy of the spreadsheet
+    - b. Set the copy's name to `<original-sheet-name>-backup-YYYY-MM-DD-NNN`
+    - c. This requires the `drive.file` scope
+    - d. Store the backup file ID in the sync log for potential recovery
+    - e. Consider: delete old backup copies from Drive if more than `backup_copies` exist
 
 8. **Execute Batch Clear and Write**
-    - Using `spreadsheets().values_batch_update()` for efficiency:
-        - **Operation 1**: Clear each tab's data range (preserve sheet structure, delete all rows
-          except header)
-            - Transactions: `"Transactions!A2:ZZ"` (everything below header row)
-            - Categories: `"Categories!A2:ZZ"`
-            - AutoCat: `"AutoCat!A2:ZZ"`
-        - **Operation 2**: Write header rows
-            - Transactions: `"Transactions!A1:ZZ1"`
-            - Categories: `"Categories!A1:ZZ1"`
-            - AutoCat: `"AutoCat!A1:ZZ1"`
-        - **Operation 3**: Write all data rows (values only)
-            - Transactions: `"Transactions!A2:ZZ"` (dynamic based on row count)
-            - Categories: `"Categories!A2:ZZ"`
-            - AutoCat: `"AutoCat!A2:ZZ"`
-        - **Operation 4** (only if `--formulas preserve`): Write formulas to original positions
-            - For each formula in the map, write to cell at (row + 2, col + 1) in A1 notation
-            - Row offset of 2 accounts for 1-indexed sheets plus header row
-            - Use `ValueInputOption::UserEntered` so formulas are interpreted
-    - Use `ValueInputOption::UserEntered` to allow Sheets to parse dates/numbers/formulas
+    - a. Use `spreadsheets().values_batch_clear()` to clear, then `values_batch_update()` to write
+    - b. All write operations use `ValueInputOption::UserEntered` to allow Sheets to parse
+      dates, numbers, and formulas
+    - c. **Clear**: Clear each tab's data range (preserve sheet structure, delete all rows
+      except header)
+        - Transactions: `"Transactions!A2:ZZ"` (everything below header row)
+        - Categories: `"Categories!A2:ZZ"`
+        - AutoCat: `"AutoCat!A2:ZZ"`
+    - d. **Write headers**: Write header rows
+        - Transactions: `"Transactions!A1:ZZ1"`
+        - Categories: `"Categories!A1:ZZ1"`
+        - AutoCat: `"AutoCat!A1:ZZ1"`
+    - e. **Write data**: Write all data rows
+        - Transactions: `"Transactions!A2:ZZ"` (dynamic based on row count)
+        - Categories: `"Categories!A2:ZZ"`
+        - AutoCat: `"AutoCat!A2:ZZ"`
+    - f. **Write formulas** (only if `--formulas preserve`): Write formulas to original positions
+        - For each formula in the map, write to cell at (row + 2, col + 1) in A1 notation
+        - Row offset of 2 accounts for 1-indexed sheets plus header row
 
 9. **Verification**
-    - Re-fetch row counts from each tab
-    - Verify counts match what we wrote
-    - Log summary: `"Synced N transactions, M categories, P autocat rules to sheet"`
-    - If `--formulas preserve`: log count of formulas written per sheet
+    - a. Re-fetch row counts from each tab
+    - b. Verify counts match what we wrote
+    - c. Log summary: `"Synced N transactions, M categories, P autocat rules to sheet"`
+    - d. If `--formulas preserve`: log count of formulas written per sheet
 
 10. **Error Handling**
-    - If any operation fails, the backup files allow manual recovery
-    - Log all operations to stderr at INFO level
-    - On failure, provide clear message about which backup to restore and hint at how to do it.
+    - a. If any operation fails, the backup files allow manual recovery
+    - b. Log all operations to stderr at INFO level
+    - c. On failure, provide clear message about which backup to restore and hint at how to do it.
 
 #### Future Enhancements
 
@@ -473,9 +472,6 @@ tiller sync up
 **Forcing overwrites** (when local is authoritative):
 
 ```bash
-# Preview changes
-tiller sync up --dry-run
-
 # Force upload despite remote changes
 tiller sync up --force
 ```
