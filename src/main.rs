@@ -3,7 +3,7 @@ use env_logger::Builder;
 use log::{debug, error, trace, LevelFilter};
 use std::process::ExitCode;
 use tiller_sync::args::{Args, Command, UpDown};
-use tiller_sync::commands;
+use tiller_sync::{commands, Mode};
 use tiller_sync::{Config, Result};
 
 #[tokio::main]
@@ -26,6 +26,11 @@ pub async fn main_inner(args: Args) -> Result<()> {
     trace!("{args:?}");
     let home = args.common().tiller_home().path();
 
+    // This allows for testing the program without hitting the Google APIs. When
+    // TILLER_SYNC_IN_TEST_MODE is set and non-zero in length, then the mode will be Mode::Test,
+    // otherwise it will be Mode::Google.
+    let mode = Mode::from_env();
+
     // Route to appropriate command handler
     match args.command() {
         Command::Init(init_args) => {
@@ -40,8 +45,8 @@ pub async fn main_inner(args: Args) -> Result<()> {
             }
         }
         Command::Sync(sync_args) => match sync_args.direction() {
-            UpDown::Up => commands::sync_up(Config::load(home).await?).await,
-            UpDown::Down => commands::sync_down(Config::load(home).await?).await,
+            UpDown::Up => commands::sync_up(Config::load(home).await?, mode).await,
+            UpDown::Down => commands::sync_down(Config::load(home).await?, mode).await,
         },
     }
 }

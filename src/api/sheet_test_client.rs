@@ -6,88 +6,218 @@
 use crate::api::{Sheet, AUTO_CAT, CATEGORIES, TRANSACTIONS};
 use crate::Result;
 use anyhow::Context;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Cursor;
 
-/// An implementation of the `Sheet` trait that does not use Google sheets. It can hold any data in
-/// memory and, by default, is seeded with some existing data.
-pub(crate) struct TestSheet {
-    pub(crate) data: HashMap<String, Vec<Vec<String>>>,
+/// Type alias for sheet data: a 2D grid of strings.
+type SheetData = Vec<Vec<String>>;
+
+/// Type alias for a map of sheet name to sheet data.
+type SheetDataMap = HashMap<String, SheetData>;
+
+/// Records a call made to `TestSheet`, including the data involved.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum SheetCall {
+    /// A get() call was made, returning the specified data
+    Get { sheet_name: String, data: SheetData },
+    /// A get_formulas() call was made, returning the specified data
+    GetFormulas { sheet_name: String, data: SheetData },
+    /// A _put() call was made with the specified data
+    _Put { sheet_name: String, data: SheetData },
 }
 
+/// An implementation of the `Sheet` trait that does not use Google sheets. It can hold any data in
+/// memory and, by default, is seeded with some existing data.
+///
+/// This struct provides:
+/// - Separate storage for values and formulas
+/// - Call history tracking for test assertions
+/// - Builder methods for easy test setup
+pub(crate) struct TestSheet {
+    /// Value data for each sheet (what `get()` returns)
+    data: SheetDataMap,
+
+    /// Formula data for each sheet (what `get_formulas()` returns).
+    /// If a sheet is not present here, `get_formulas()` falls back to `data`.
+    formulas: SheetDataMap,
+
+    /// History of all calls made to this sheet. Uses RefCell for interior mutability
+    /// so we can record calls even through the `&mut self` trait methods.
+    call_history: RefCell<Vec<SheetCall>>,
+}
+
+// These methods are used by tests in other modules (e.g., sync tests).
+// Allow dead_code until those tests are written.
+#[allow(dead_code)]
 impl TestSheet {
-    /// Create a new `TestSheet` using `data`. The map key is sheet name and the map value is the
-    /// rows of the sheet.
-    pub(crate) fn new(data: HashMap<String, Vec<Vec<String>>>) -> Self {
-        Self { data }
+    /// Create a new empty `TestSheet`.
+    pub(crate) fn new() -> Self {
+        Self {
+            data: HashMap::new(),
+            formulas: HashMap::new(),
+            call_history: RefCell::new(Vec::new()),
+        }
+    }
+
+    /// Builder method: add value data for a sheet.
+    pub(crate) fn with_sheet(mut self, sheet_name: &str, data: SheetData) -> Self {
+        self.data.insert(sheet_name.to_string(), data);
+        self
+    }
+
+    /// Builder method: add formula data for a sheet.
+    /// If not set, `get_formulas()` will return the same data as `get()`.
+    pub(crate) fn with_formulas(mut self, sheet_name: &str, formulas: SheetData) -> Self {
+        self.formulas.insert(sheet_name.to_string(), formulas);
+        self
+    }
+
+    /// Get the call history for test assertions.
+    pub(crate) fn call_history(&self) -> Vec<SheetCall> {
+        self.call_history.borrow().clone()
+    }
+
+    /// Clear the call history (useful between test phases).
+    pub(crate) fn clear_history(&self) {
+        self.call_history.borrow_mut().clear();
+    }
+
+    /// Get the current data for a sheet (useful for verifying _put results).
+    pub(crate) fn get_data(&self, sheet_name: &str) -> Option<&SheetData> {
+        self.data.get(sheet_name)
+    }
+
+    /// Record a call to the history.
+    fn record_call(&self, call: SheetCall) {
+        self.call_history.borrow_mut().push(call);
     }
 }
 
 #[async_trait::async_trait]
 impl Sheet for TestSheet {
-    async fn get(&mut self, sheet_name: &str) -> Result<Vec<Vec<String>>> {
-        self.data
+    async fn get(&mut self, sheet_name: &str) -> Result<SheetData> {
+        let data = self
+            .data
             .get(sheet_name)
-            .with_context(|| format!("Sheet '{sheet_name}' not found"))
-            .cloned()
+            .with_context(|| format!("Sheet '{sheet_name}' not found"))?
+            .clone();
+
+        self.record_call(SheetCall::Get {
+            sheet_name: sheet_name.to_string(),
+            data: data.clone(),
+        });
+
+        Ok(data)
     }
 
-    async fn get_formulas(&mut self, sheet_name: &str) -> Result<Vec<Vec<String>>> {
-        // Get the base data
-        let mut formula_data = self.get(sheet_name).await?;
+    async fn get_formulas(&mut self, sheet_name: &str) -> Result<SheetData> {
+        // If formulas are explicitly set, use them; otherwise fall back to data
+        let data = if let Some(formula_data) = self.formulas.get(sheet_name) {
+            formula_data.clone()
+        } else {
+            self.data
+                .get(sheet_name)
+                .with_context(|| format!("Sheet '{sheet_name}' not found"))?
+                .clone()
+        };
 
-        // For TRANSACTIONS sheet, add formulas to the "Custom Column" (last column)
-        if sheet_name == TRANSACTIONS && !formula_data.is_empty() {
-            let header_row = &formula_data[0];
-            // Find the "Custom Column" index
-            if let Some(custom_col_idx) = header_row.iter().position(|h| h == "Custom Column") {
-                // For each data row (skip header), replace the Custom Column value with a formula
-                for (row_idx, row) in formula_data.iter_mut().enumerate().skip(1) {
-                    if row.len() > custom_col_idx {
-                        // Formula: =ABS(E{row_num}) where E is the Amount column, row_num is 1-indexed
-                        let sheet_row_num = row_idx + 1; // Convert to 1-indexed sheet row number
-                        row[custom_col_idx] = format!("=ABS(E{sheet_row_num})");
-                    }
-                }
-            }
-        }
+        self.record_call(SheetCall::GetFormulas {
+            sheet_name: sheet_name.to_string(),
+            data: data.clone(),
+        });
 
-        Ok(formula_data)
+        Ok(data)
     }
 
     async fn _put(&mut self, sheet_name: &str, data: &[Vec<String>]) -> crate::Result<()> {
-        self.data.insert(sheet_name.to_string(), data.to_vec());
+        let data_vec = data.to_vec();
+
+        self.record_call(SheetCall::_Put {
+            sheet_name: sheet_name.to_string(),
+            data: data_vec.clone(),
+        });
+
+        self.data.insert(sheet_name.to_string(), data_vec);
         Ok(())
     }
 }
 
 impl Default for TestSheet {
-    /// Loads seed data from this module.
+    /// Loads seed data from this module, including formulas for the Transactions sheet.
     fn default() -> Self {
-        Self::new(default_data())
+        let (data, formulas) = default_data();
+        Self {
+            data,
+            formulas,
+            call_history: RefCell::new(Vec::new()),
+        }
     }
 }
 
-/// Provides the seed data from this module.
-fn default_data() -> HashMap<String, Vec<Vec<String>>> {
-    let mut map = HashMap::new();
-    let transactions = load_csv(TRANSACTION_DATA).unwrap();
-    map.insert(TRANSACTIONS.to_string(), transactions);
-    let categories = load_csv(CATEGORY_DATA).unwrap();
-    map.insert(CATEGORIES.to_string(), categories);
-    let auto_cat = load_csv(AUTO_CAT_DATA).unwrap();
-    map.insert(AUTO_CAT.to_string(), auto_cat);
-    map
+/// Provides the seed data and formula data from this module.
+fn default_data() -> (SheetDataMap, SheetDataMap) {
+    let mut data = HashMap::new();
+    let mut formulas = HashMap::new();
+
+    // Load transactions
+    let transactions = load_csv(TRANSACTION_DATA).expect("Failed to load transaction seed data");
+    data.insert(TRANSACTIONS.to_string(), transactions.clone());
+
+    // Generate formula data for transactions (formulas in "Custom Column")
+    let transaction_formulas = generate_transaction_formulas(&transactions);
+    formulas.insert(TRANSACTIONS.to_string(), transaction_formulas);
+
+    // Load categories (no formulas)
+    let categories = load_csv(CATEGORY_DATA).expect("Failed to load category seed data");
+    data.insert(CATEGORIES.to_string(), categories);
+
+    // Load autocat (no formulas)
+    let auto_cat = load_csv(AUTO_CAT_DATA).expect("Failed to load autocat seed data");
+    data.insert(AUTO_CAT.to_string(), auto_cat);
+
+    (data, formulas)
+}
+
+/// Generates formula data for transactions, with =ABS(E{row}) formulas in "Custom Column".
+fn generate_transaction_formulas(transactions: &[Vec<String>]) -> SheetData {
+    if transactions.is_empty() {
+        return Vec::new();
+    }
+
+    let header_row = &transactions[0];
+    let custom_col_idx = header_row.iter().position(|h| h == "Custom Column");
+
+    transactions
+        .iter()
+        .enumerate()
+        .map(|(row_idx, row)| {
+            if row_idx == 0 {
+                // Header row stays the same
+                row.clone()
+            } else if let Some(col_idx) = custom_col_idx {
+                // Data row: replace Custom Column with formula
+                let mut formula_row = row.clone();
+                if formula_row.len() > col_idx {
+                    let sheet_row_num = row_idx + 1; // 1-indexed sheet row
+                    formula_row[col_idx] = format!("=ABS(E{sheet_row_num})");
+                }
+                formula_row
+            } else {
+                row.clone()
+            }
+        })
+        .collect()
 }
 
 /// Loads data from a CSV-formatted string.
-fn load_csv(csv_data: &str) -> Result<Vec<Vec<String>>> {
+fn load_csv(csv_data: &str) -> Result<SheetData> {
     let bytes = csv_data.as_bytes(); // Get a byte slice from the String
     let mut rdr = csv::ReaderBuilder::new()
         .has_headers(false) // Ensure headers are treated as part of the data
         .from_reader(Cursor::new(bytes));
 
-    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut rows: SheetData = Vec::new();
 
     for result in rdr.records() {
         let record = result?;
@@ -136,3 +266,86 @@ Groceries,Whole Foods,,,,,,,,,
 Coffee Shops,Starbucks,,,,,,,,,
 Gas & Fuel,Shell,,,,,,,,,
 "##;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_builder_and_call_history() {
+        // Build a TestSheet with custom data
+        let mut sheet = TestSheet::new()
+            .with_sheet(
+                "TestTab",
+                vec![
+                    vec!["Header1".to_string(), "Header2".to_string()],
+                    vec!["Value1".to_string(), "Value2".to_string()],
+                ],
+            )
+            .with_formulas(
+                "TestTab",
+                vec![
+                    vec!["Header1".to_string(), "Header2".to_string()],
+                    vec!["Value1".to_string(), "=A2".to_string()],
+                ],
+            );
+
+        // Initially, call history should be empty
+        assert!(sheet.call_history().is_empty());
+
+        // Call get and verify it's recorded
+        let data = sheet.get("TestTab").await.unwrap();
+        assert_eq!(data[1][0], "Value1");
+
+        let history = sheet.call_history();
+        assert_eq!(history.len(), 1);
+        assert!(
+            matches!(&history[0], SheetCall::Get { sheet_name, .. } if sheet_name == "TestTab")
+        );
+
+        // Call get_formulas and verify we get the formula data
+        let formulas = sheet.get_formulas("TestTab").await.unwrap();
+        assert_eq!(formulas[1][1], "=A2");
+
+        let history = sheet.call_history();
+        assert_eq!(history.len(), 2);
+        assert!(
+            matches!(&history[1], SheetCall::GetFormulas { sheet_name, .. } if sheet_name == "TestTab")
+        );
+
+        // Call _put and verify it updates data and is recorded
+        let new_data = vec![vec!["NewHeader".to_string()], vec!["NewValue".to_string()]];
+        sheet._put("TestTab", &new_data).await.unwrap();
+
+        // Verify _put updated the stored data
+        let stored = sheet.get_data("TestTab").unwrap();
+        assert_eq!(stored[0][0], "NewHeader");
+
+        let history = sheet.call_history();
+        assert_eq!(history.len(), 3);
+        assert!(
+            matches!(&history[2], SheetCall::_Put { sheet_name, .. } if sheet_name == "TestTab")
+        );
+
+        // Test clear_history
+        sheet.clear_history();
+        assert!(sheet.call_history().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_formulas_falls_back_to_data() {
+        // When formulas are not set, get_formulas should return the same as get
+        let mut sheet = TestSheet::new().with_sheet(
+            "NoFormulas",
+            vec![
+                vec!["A".to_string(), "B".to_string()],
+                vec!["1".to_string(), "2".to_string()],
+            ],
+        );
+
+        let data = sheet.get("NoFormulas").await.unwrap();
+        let formulas = sheet.get_formulas("NoFormulas").await.unwrap();
+
+        assert_eq!(data, formulas);
+    }
+}

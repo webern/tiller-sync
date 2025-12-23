@@ -105,7 +105,7 @@ impl Db {
     /// - Transactions: upsert (insert new, update existing, delete removed)
     /// - Categories: delete all, then insert all
     /// - AutoCat: delete all, then insert all
-    pub(crate) async fn _save_tiller_data(&self, data: &TillerData) -> Result<()> {
+    pub(crate) async fn save_tiller_data(&self, data: &TillerData) -> Result<()> {
         use sqlx::Row;
 
         // Get existing transaction IDs for upsert logic
@@ -874,7 +874,7 @@ mod tests {
             auto_cats,
         };
 
-        db._save_tiller_data(&data).await.unwrap();
+        db.save_tiller_data(&data).await.unwrap();
     }
 
     #[tokio::test]
