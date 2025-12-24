@@ -36,7 +36,7 @@ do next.
 
 What's Already Built for `tiller sync up`
 
-1. Data Download (sync down) - Complete
+1. Data Download (`sync down`) - Complete
 2. Model Layer - Complete
 3. API Layer - Partial
     - Sheet trait has get(), get_formulas() (implemented) and `_put()` (stub with todo!())
@@ -45,6 +45,7 @@ What's Already Built for `tiller sync up`
     - Tiller trait has get_data() only - no put_data() method yet
 4. OAuth & Config - Complete
 5. Database migrations and initial schema creation
+6. Data upload (`sync up`) - Implemented, working
 
 Glossary:
 
@@ -56,63 +57,9 @@ Glossary:
 
 Next Steps:
 
-- [X] GENERAL: Investigate the existing code base to understand where we left off.
-- [X] SYNC_DOWN: Precondition checks - Verify datastore exists with transactions
-- [X] BACKUP: Backup SQLite database
-- [X] BACKUP: Add `sync-down.*.json` backup logic to `tiller sync down`
-- [X] SYNC_UP: Download current sheet state - Save to sync-up-pre.*.json backup
-- [X] SQL: Choose a Rust library for SQLite operations and add it to the project and to `Db`
-- [X] SQL: Create a schema migration design and add it to DESIGN.md
-- [X] SQL: Create an implementation plan for building the SQLite datastore and add the steps to
-  AGENTS.md. The plan should divide up the implementation into 5-10 discrete steps.
-- [X] SQL: Create src/db/migrations/ directory, CURRENT_VERSION constant in db/mod.rs
-- [X] SQL: Implement bootstrap logic (creates schema_version table, inserts version 0)
-- [X] SQL: Write a test of the bootstrap logic
-- [X] SQL: Implement the logic that detects the required migrations and executes them
-- [X] SQL: Create Migration 1, research Tiller documentation and our model structs for table
-  structure
-- [X] SQL: Write tests for the migration system
-- [X] SQL: Wire migration logic into Db::init() - create a shared function that can also be used by
-  load()
-- [X] SQL: Wire migration logic into Db::load()
-- [X] SQL Add sheet metadata table to Migration 1
-- [X] SQL Add `original_order` column to tables in Migration 1
-- [X] SQL Add `other_fields` columns to Migration 1
-- [X] SQL Add `formulas` table to Migration 1
-- [X] SQL Change `categories` table to use synthetic primary key in Migration 1
-- [X] SQL TDD: Stub `db.save_tiller_data` and `db.get_tiller_data` functions with `todo!()` function
-  bodies and write TWO basic tests. One for each function. These tests will fail at first (think
-  Red/Green TDD).
-- [X] SQL TDD: Stub `db.insert_transaction`, `db.update_transaction`, and `db.get_transaction`
-  functions with `todo!()` bodies and failing Red/Green tests.
-- [X] SQL TDD: Stub `db.insert_category`, `db.update_category`, and `db.get_category` functions with
-  `todo!()` bodies and failing Red/Green tests.
-- [X] SQL TDD: Stub `db.insert_autocat`, `db.update_autocat`, and `db.get_autocat` functions with
-  `todo!()` bodies and failing Red/Green tests.
-- [X] SQL TDD: Think of and propose more tests that will check nuances of the logic of these
-  functions and write them.
-- [X] SQL: Implement stubbed functions and get the tests to pass.
-- [X] SYNC_UP: Update the algorithm in DESIGN.md
-- [X] SYNC_UP: Improve the flexibility of the `TestSheet` struct. We will be using this extensively
-  to test the behavior of the `sync up` algorithm. Figure out what we are going to need from the
-  testing mock and implement those extensions.
-- [X] SYNC_UP: Wire `sync down` to begin actually using the datastore, and stop printing its results
-  to stdout.
-- [X] SYNC_UP: Add a basic test to the `sync.rs` file for `sync_down` using the `TestSheet` mock.
-- [ ] SYNC_UP: Add extensive, failing tests (RED/GREEN TDD style) to `sync.rs` for the `sync_up`
-  command. As you encounter the need for functions that do not exist, stub them with `todo!()` as
-  their function body. Test the `sync up` algorithm thoroughly in these tests using `TestSheet`.
-  ONLY ADD ONE TEST AT A TIME. Each time you add a test, show it to the user, let the user comment
-  on it, then add the test and move on to add ONE MORE TEST.
-
-STOP: WE ARE NOT READY FOR THESE YET
-
-- [ ] SYNC_UP: Implement gap detection logic for original_order
-- [ ] SYNC_UP: Build output data - Convert model objects to `Vec<Vec<String>>`
-- [ ] SYNC_UP: Conflict detection - Compare with last sync-down.*.json
-- [ ] SYNC_UP: Backup Google Sheet - Use Drive API files.copy endpoint
-- [ ] SYNC_UP: Execute batch clear and write - Clear data ranges, write headers, write data
-- [ ] SYNC_UP: Verification - Re-fetch row counts
+- [X] A human needs to test `tiller sync up` to see if it actually works
+- [ ] Add a CLI interface for querying, updating, deleting and inserting records
+- [ ] Begin working on the MCP interface
 
 ## Instruction Imports
 
@@ -149,7 +96,8 @@ When writing or editing Rust code, always run the following commands before you 
 done:
 
 - Run `cargo fmt`
-- Run `cargo clippy --all-features -- -D warnings` and fix all problems if possible
+- Run `cargo clippy -- -D warnings && cargo clippy --all-features -- -D warnings` and fix all
+  problems if possible
 
 When editing code, make sure you run the tests:
 

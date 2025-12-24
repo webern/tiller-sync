@@ -170,7 +170,11 @@ pub struct SyncArgs {
     client_secret: Option<PathBuf>,
 
     /// The path to the Google OAuth token file, defaults to $TILLER_HOME/.secrets/token.json
-    oath_token: Option<PathBuf>,
+    oauth_token: Option<PathBuf>,
+
+    /// Force sync up even if conflicts are detected or sync-down backup is missing
+    #[arg(long)]
+    force: bool,
 }
 
 impl SyncArgs {
@@ -178,7 +182,8 @@ impl SyncArgs {
         Self {
             direction,
             client_secret: secret,
-            oath_token,
+            oauth_token: oath_token,
+            force: false,
         }
     }
 
@@ -191,7 +196,11 @@ impl SyncArgs {
     }
 
     pub fn oath_token(&self) -> Option<&PathBuf> {
-        self.oath_token.as_ref()
+        self.oauth_token.as_ref()
+    }
+
+    pub fn force(&self) -> bool {
+        self.force
     }
 }
 

@@ -400,7 +400,6 @@ fn extract_spreadsheet_id(url: &str) -> Result<&str> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    use tokio::io::AsyncWriteExt;
     use utils;
 
     #[tokio::test]
@@ -510,8 +509,7 @@ mod tests {
             "backup_copies": 3
         }"#;
 
-        let mut file = tokio::fs::File::create(&config_path).await.unwrap();
-        file.write_all(json.as_bytes()).await.unwrap();
+        tokio::fs::write(&config_path, json).await.unwrap();
 
         let config = ConfigFile::load(&config_path).await.unwrap();
 
@@ -539,8 +537,7 @@ mod tests {
             "backup_copies": 5
         }"#;
 
-        let mut file = tokio::fs::File::create(&config_path).await.unwrap();
-        file.write_all(json.as_bytes()).await.unwrap();
+        tokio::fs::write(&config_path, json).await.unwrap();
 
         let result = ConfigFile::load(&config_path).await;
         assert!(result.is_err());

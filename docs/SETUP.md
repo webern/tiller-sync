@@ -18,16 +18,29 @@ through the Google Cloud Console.
 **Wait for the project to be created** (this may take a few seconds). Once created, ensure you've
 selected your new project from the project dropdown.
 
-### Step 2: Enable Google Sheets API
+### Step 2: Enable Required APIs
+
+Tiller Sync requires two Google APIs: the **Sheets API** for reading/writing spreadsheet data, and
+the **Drive API** for creating backup copies before sync operations.
 
 1. In the Google Cloud Console, ensure your "Tiller Sync" project is selected
 2. Navigate to **"APIs & Services"** > **"Library"** (use the left sidebar or search)  
    <img src="images/setup-02a-enable-api.jpg" alt="drawing" width="300"/>
+
+**Enable Google Sheets API:**
+
 3. In the API Library search box, type **"Google Sheets API"**  
    <img src="images/setup-02b-enable-api.jpg" alt="drawing" width="300"/>
 4. Click on **"Google Sheets API"** in the results
 5. Click the **"Enable"** button  
    <img src="images/setup-02c-enable-api.jpg" alt="drawing" width="300"/>
+
+**Enable Google Drive API:**
+
+6. Return to **"APIs & Services"** > **"Library"**
+7. In the API Library search box, type **"Google Drive API"**
+8. Click on **"Google Drive API"** in the results
+9. Click the **"Enable"** button  
 
 ### Step 3: Configure OAuth Consent Screen
 
@@ -51,12 +64,22 @@ Before creating credentials, you must configure the OAuth consent screen.
 
 1. On the **"Data Access"** page, click **"Add or Remove Scopes"**  
    <img src="images/setup-03e-data-access.jpg" alt="drawing" width="500"/>
+
+**Add Sheets scope:**
+
 2. In the filter box, search for `sheets`  
    <img src="images/setup-03f-search-sheets.jpg" alt="drawing" width="500"/>
 3. Select the checkbox for **`https://www.googleapis.com/auth/spreadsheets`**
     - This scope allows read and write access to Google Sheets  
       <img src="images/setup-03g-spreadsheet-scope.jpg" alt="drawing" width="500"/>
-4. Click **"Update"** at the bottom of the dialog, then "Save"
+
+**Add Drive scope:**
+
+4. Clear the filter box and search for `drive`
+5. Select the checkbox for **`https://www.googleapis.com/auth/drive`**
+    - This scope allows creating backup copies of your Tiller spreadsheet
+
+6. Click **"Update"** at the bottom of the dialog, then "Save"
 
 ### Step 5: Create a User
 

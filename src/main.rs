@@ -45,7 +45,16 @@ pub async fn main_inner(args: Args) -> Result<()> {
             }
         }
         Command::Sync(sync_args) => match sync_args.direction() {
-            UpDown::Up => commands::sync_up(Config::load(home).await?, mode).await,
+            UpDown::Up => {
+                let formulas_mode = commands::FormulasMode::Unknown;
+                commands::sync_up(
+                    Config::load(home).await?,
+                    mode,
+                    sync_args.force(),
+                    formulas_mode,
+                )
+                .await
+            }
             UpDown::Down => commands::sync_down(Config::load(home).await?, mode).await,
         },
     }

@@ -19,7 +19,7 @@ impl Display for MappingError {
 impl StdError for MappingError {}
 
 #[derive(Default, Debug, Clone, Eq, PartialEq)]
-pub(crate) struct Mapping {
+pub struct Mapping {
     headers: Vec<Header>,
     columns: Vec<Column>,
     header_map: HashMap<Header, usize>,
@@ -83,6 +83,10 @@ impl Mapping {
 
     pub fn headers(&self) -> &[Header] {
         &self.headers
+    }
+
+    pub fn columns(&self) -> &[Column] {
+        &self.columns
     }
 
     pub fn _header_index(&self, header: impl Into<Header>) -> Option<usize> {
@@ -234,7 +238,7 @@ fn is_valid_column_name_char(c: char) -> bool {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::model::transaction::{ACCOUNT_NUMBER_STR, _ACCOUNT_NUMBER_COL};
+    use crate::model::transaction::ACCOUNT_NUMBER_STR;
 
     #[test]
     fn test_legal_column_name_chars() {
@@ -284,7 +288,7 @@ mod test {
     #[test]
     fn test_to_camel_case_01() {
         let original = ACCOUNT_NUMBER_STR;
-        let expected = _ACCOUNT_NUMBER_COL;
+        let expected = "account_number";
         let actual = to_camel_case(original);
         assert_eq!(expected, actual);
         validate_column_name(actual).unwrap();
