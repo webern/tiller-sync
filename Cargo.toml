@@ -14,11 +14,9 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 csv = "1"
 dirs = "6"
-env_logger = "0.11"
 format_num = "0.1"
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
-log = "0.4"
 oauth2 = "5"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 rust_decimal = "1"
@@ -33,6 +31,8 @@ serde_plain = "1"
 sheets = { git = "https://github.com/webern/oxide-third-party-api-clients", tag = "patch-v1" }
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
 uuid = { version = "1.18.1", features = ["v4"] }
 

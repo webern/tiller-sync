@@ -3,12 +3,12 @@
 use crate::api::{Sheet, SheetRange, TokenProvider};
 use crate::{Config, Result};
 use anyhow::Context;
-use log::trace;
 use sheets::types::{
     BatchClearValuesRequest, BatchUpdateValuesRequest, DateTimeRenderOption, Dimension,
     ValueInputOption, ValueRange, ValueRenderOption,
 };
 use sheets::ClientError;
+use tracing::trace;
 
 /// Implements the `Sheet` trait using the `sheets:Client` to interact with a Google sheet. It takes
 /// a `TokenProvider`, on which it calls refresh to keep the token up-to-date.

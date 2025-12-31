@@ -1,13 +1,14 @@
 //! These structs provide the CLI interface for the tiller CLI.
 
 use clap::{Parser, Subcommand};
-use log::{error, LevelFilter};
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use tracing::error;
+use tracing_subscriber::filter::LevelFilter;
 
 /// tiller: A command-line tool for manipulating financial data.
 ///
@@ -72,10 +73,10 @@ pub enum Command {
 #[derive(Debug, Parser, Clone)]
 pub struct Common {
     /// The logging verbosity. One of, from least to most verbose:
-    /// none, error, warn, info, debug, trace
+    /// off, error, warn, info, debug, trace
     ///
-    /// This can be overridden by RUST_LOG. See the env_logger crate for instructions.
-    #[arg(long, default_value_t = LevelFilter::Info)]
+    /// This can be overridden by the RUST_LOG environment variable.
+    #[arg(long, default_value_t = LevelFilter::INFO)]
     log_level: LevelFilter,
 
     /// The directory where tiller data and configuration is held. Defaults to ~/tiller

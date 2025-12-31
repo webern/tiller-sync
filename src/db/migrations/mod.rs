@@ -5,8 +5,8 @@
 //! - `migration_NN_down.sql` - Downgrades schema from version `NN` to version `NN-1`
 
 use anyhow::{bail, Context};
-use log::debug;
 use sqlx::{Executor, SqlitePool};
+use tracing::debug;
 
 use crate::Result;
 

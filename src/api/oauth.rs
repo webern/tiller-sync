@@ -4,7 +4,6 @@ use crate::Result;
 use anyhow::{anyhow, bail, Context};
 use chrono::Utc;
 use hyper::StatusCode;
-use log::{debug, error};
 use oauth2::basic::BasicClient;
 use oauth2::{
     AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge, RedirectUrl,
@@ -15,6 +14,7 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::{debug, error};
 
 #[derive(Debug, Clone)]
 pub(crate) struct TokenProvider {

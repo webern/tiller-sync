@@ -4,8 +4,8 @@ use crate::model::TillerData;
 use crate::{utils, Config, Result};
 use anyhow::Context;
 use chrono::Local;
-use log::debug;
 use std::path::PathBuf;
+use tracing::debug;
 
 /// Prefix for sync-down backup files.
 pub const SYNC_DOWN: &str = "sync-down";

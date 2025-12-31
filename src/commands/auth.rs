@@ -7,7 +7,7 @@
 use crate::api::TokenProvider;
 use crate::{Config, Result};
 use anyhow::Context;
-use log::info;
+use tracing::info;
 
 /// Handles the `tiller auth` command - runs the OAuth consent flow
 ///

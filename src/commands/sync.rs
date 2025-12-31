@@ -3,7 +3,7 @@ use crate::api::{sheet, tiller, Mode, Tiller};
 use crate::backup::{SYNC_DOWN, SYNC_UP_PRE};
 use crate::{Config, Result};
 use anyhow::bail;
-use log::{debug, info, warn};
+use tracing::{debug, info, warn};
 
 pub async fn sync_down(config: Config, mode: Mode) -> Result<()> {
     // Backup SQLite database before modifying

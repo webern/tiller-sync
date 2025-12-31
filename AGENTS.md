@@ -60,7 +60,7 @@ Glossary:
 #### MCP Implementation:
 
 - [X] Update DESIGN.md with MCP section
-- [ ] Migrate from `log`/`env_logger` to `tracing`/`tracing-subscriber`
+- [X] Migrate from `log`/`env_logger` to `tracing`/`tracing-subscriber`
 - [ ] Create public error type in `error.rs` supporting `isError` pattern
 - [ ] Add `rmcp` dependency to Cargo.toml
 - [ ] Add `tiller mcp` subcommand to CLI args
