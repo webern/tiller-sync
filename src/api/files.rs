@@ -72,11 +72,6 @@ where
     pub(super) fn data_mut(&mut self) -> &mut F {
         &mut self.data
     }
-
-    /// Get the file path
-    pub(super) fn _path(&self) -> &Path {
-        &self.path
-    }
 }
 
 /// Represents the structure of the `client_secret.json` file downloaded from Google Cloud Console.
@@ -114,16 +109,17 @@ impl SecretFile {
     ///
     /// # Errors
     /// Returns an error if the file cannot be read or parsed
-    pub(crate) async fn _load(path: &Path) -> Result<SecretFile> {
+    #[cfg(test)]
+    pub(crate) async fn load(path: &Path) -> Result<SecretFile> {
         utils::deserialize(path)
             .await
             .context("Unable to read ClientSecretFile")
     }
 
     /// Get the redirect URI
-    // TODO: remove if it is not being used.
-    pub(crate) fn _redirect_uri(&self) -> &str {
-        self.installed.redirect_uris._value()
+    #[cfg(test)]
+    pub(crate) fn redirect_uri(&self) -> &str {
+        self.installed.redirect_uris.value()
     }
 
     /// Get the client ID
@@ -171,8 +167,9 @@ pub(crate) struct InstalledCredentials {
 #[derive(Default, Debug, Clone)]
 struct RedirectUris(Vec<String>);
 
+#[cfg(test)]
 impl RedirectUris {
-    fn _value(&self) -> &str {
+    fn value(&self) -> &str {
         REDIRECT
     }
 }
@@ -312,8 +309,8 @@ async fn test_client_secret_good_redirect() {
     let temp_dir = TempDir::new().unwrap();
     let p = temp_dir.path().join("file.json");
     utils::write(&p, json_data).await.unwrap();
-    let secret_file = SecretFile::_load(&p).await.unwrap();
-    assert_eq!("http://localhost", secret_file._redirect_uri());
+    let secret_file = SecretFile::load(&p).await.unwrap();
+    assert_eq!("http://localhost", secret_file.redirect_uri());
 }
 
 #[tokio::test]
@@ -337,8 +334,8 @@ async fn test_client_secret_good_redirect_2() {
     let temp_dir = TempDir::new().unwrap();
     let p = temp_dir.path().join("file.json");
     utils::write(&p, json_data).await.unwrap();
-    let secret_file = SecretFile::_load(&p).await.unwrap();
-    assert_eq!("http://localhost", secret_file._redirect_uri());
+    let secret_file = SecretFile::load(&p).await.unwrap();
+    assert_eq!("http://localhost", secret_file.redirect_uri());
 }
 
 #[tokio::test]
@@ -362,7 +359,7 @@ async fn test_client_secret_bad_redirect() {
     let temp_dir = TempDir::new().unwrap();
     let p = temp_dir.path().join("file.json");
     utils::write(&p, json_data).await.unwrap();
-    let parse_result = SecretFile::_load(&p).await;
+    let parse_result = SecretFile::load(&p).await;
     assert!(parse_result.is_err());
     let parse_error = parse_result.err().unwrap();
     let parse_error_message = format!("{parse_error:?}");
@@ -396,7 +393,7 @@ async fn test_validate_token_file_bad() {
     let validation_result = TokenFile::load(&json_path).await;
     assert!(validation_result.is_err());
     let error_message = validation_result.err().unwrap().to_string();
-    assert!(error_message.contains("https://www.googleapis.com/auth/drive.file"));
+    assert!(error_message.contains("https://www.googleapis.com/auth/drive"));
     assert!(error_message.contains("tiller auth"));
 }
 
@@ -410,7 +407,7 @@ async fn test_validate_token_file_good() {
         {
             "scopes": [
                 "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive.file"
+                "https://www.googleapis.com/auth/drive"
             ],
             "access_token":"abc12",
             "refresh_token":"xyz89",

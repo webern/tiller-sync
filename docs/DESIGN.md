@@ -420,20 +420,15 @@ dependencies on row/column ordering and provides predictable, repeatable results
     - a. Use `spreadsheets().values_batch_clear()` to clear, then `values_batch_update()` to write
     - b. All write operations use `ValueInputOption::UserEntered` to allow Sheets to parse
       dates, numbers, and formulas
-    - c. **Clear**: Clear each tab's data range (preserve sheet structure, delete all rows
-      except header)
-        - Transactions: `"Transactions!A2:ZZ"` (everything below header row)
-        - Categories: `"Categories!A2:ZZ"`
-        - AutoCat: `"AutoCat!A2:ZZ"`
-    - d. **Write headers**: Write header rows
-        - Transactions: `"Transactions!A1:ZZ1"`
-        - Categories: `"Categories!A1:ZZ1"`
-        - AutoCat: `"AutoCat!A1:ZZ1"`
-    - e. **Write data**: Write all data rows
-        - Transactions: `"Transactions!A2:ZZ"` (dynamic based on row count)
-        - Categories: `"Categories!A2:ZZ"`
-        - AutoCat: `"AutoCat!A2:ZZ"`
-    - f. **Write formulas** (only if `--formulas preserve`): Write formulas to original positions
+    - c. **Clear**: Clear each tab entirely (headers and data)
+        - Transactions: `"Transactions!A1:ZZ"`
+        - Categories: `"Categories!A1:ZZ"`
+        - AutoCat: `"AutoCat!A1:ZZ"`
+    - d. **Write**: Write all rows (headers + data) in a single operation
+        - Transactions: `"Transactions!A1:ZZ"`
+        - Categories: `"Categories!A1:ZZ"`
+        - AutoCat: `"AutoCat!A1:ZZ"`
+    - e. **Write formulas** (only if `--formulas preserve`): Write formulas to original positions
         - For each formula in the map, write to cell at (row + 2, col + 1) in A1 notation
         - Row offset of 2 accounts for 1-indexed sheets plus header row
 

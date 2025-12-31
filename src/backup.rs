@@ -4,6 +4,7 @@ use crate::model::TillerData;
 use crate::{utils, Config, Result};
 use anyhow::Context;
 use chrono::Local;
+use log::debug;
 use std::path::PathBuf;
 
 /// Prefix for sync-down backup files.
@@ -74,6 +75,51 @@ impl Backup {
         self.rotate(SQLITE, "").await?;
 
         Ok(path)
+    }
+
+    /// Loads the most recent JSON backup file with the given prefix.
+    ///
+    /// Returns `None` if no backup files exist.
+    pub async fn load_latest_json(&self, prefix: &str) -> Result<Option<TillerData>> {
+        let latest = self.find_latest_backup(prefix, "json").await?;
+
+        match latest {
+            None => {
+                debug!("No {prefix} backup found");
+                Ok(None)
+            }
+            Some(path) => {
+                debug!("Loading backup from {}", path.display());
+                let content = utils::read(&path).await?;
+                let data: TillerData = serde_json::from_str(&content)
+                    .with_context(|| format!("Failed to parse backup file: {}", path.display()))?;
+                Ok(Some(data))
+            }
+        }
+    }
+
+    /// Finds the most recent backup file with the given prefix and extension.
+    async fn find_latest_backup(&self, prefix: &str, extension: &str) -> Result<Option<PathBuf>> {
+        let mut files: Vec<(PathBuf, String)> = Vec::new();
+
+        let mut dir = utils::read_dir(&self.backups_dir).await?;
+        while let Some(entry) = dir
+            .next_entry()
+            .await
+            .context("Failed to read directory entry")?
+        {
+            let file_name = entry.file_name();
+            let name = file_name.to_string_lossy().to_string();
+
+            if is_backup_file(&name, prefix, extension) {
+                files.push((entry.path(), name));
+            }
+        }
+
+        // Sort by filename descending (most recent last due to date-seq format)
+        files.sort_by(|a, b| b.1.cmp(&a.1));
+
+        Ok(files.into_iter().next().map(|(path, _)| path))
     }
 
     /// Scans the backups directory for existing files with the given prefix and date,

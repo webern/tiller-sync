@@ -1,20 +1,45 @@
-//! Implements the very simple `Sheet` trait using in-memory data for testing purposes.
+//! Implements the `Sheet` trait using in-memory data for testing purposes.
+//!
+//! The implementation is a bit complicated, it works like this:
+//! * There is a static map of these
+//! * The key of the map is the `sheet_id` found in the `sheet_url` of `Config`
+//! * This way, the state of the `TestSheet` can persist through `sync_up` and `sync_down` calls.
 //!
 //! Note: this is compiled even in the "production" version of this app so that we can run the whole
 //! app, top-to-bottom, without using Google Sheets.
 
-use crate::api::{Sheet, AUTO_CAT, CATEGORIES, TRANSACTIONS};
+use crate::api::{Sheet, SheetRange, AUTO_CAT, CATEGORIES, TRANSACTIONS};
 use crate::Result;
 use anyhow::Context;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::sync::{Mutex, MutexGuard, OnceLock};
+
+/// TestSheets that persist across multiple sync calls.
+static TEST_SHEETS: OnceLock<Mutex<HashMap<String, TestSheetState>>> = OnceLock::new();
 
 /// Type alias for sheet data: a 2D grid of strings.
 type SheetData = Vec<Vec<String>>;
 
 /// Type alias for a map of sheet name to sheet data.
 type SheetDataMap = HashMap<String, SheetData>;
+
+/// The underlying data that we store to represent a pretend Google Sheets file (which can have
+/// multiple, named sheets).
+#[derive(Debug, Default, Clone, PartialEq)]
+pub(crate) struct TestSheetState {
+    /// Value data for each sheet (what `get()` returns)
+    pub(crate) data: SheetDataMap,
+
+    /// Formula data for each sheet (what `get_formulas()` returns).
+    /// If a sheet is not present here, `get_formulas()` falls back to `data`.
+    pub(crate) formulas: SheetDataMap,
+
+    /// History of all calls made to this sheet. Uses RefCell for interior mutability
+    /// so we can record calls even through the `&mut self` trait methods.
+    pub(crate) call_history: RefCell<Vec<SheetCall>>,
+}
 
 /// Records a call made to `TestSheet`, including the data involved.
 #[derive(Debug, Clone, PartialEq)]
@@ -23,8 +48,12 @@ pub(crate) enum SheetCall {
     Get { sheet_name: String, data: SheetData },
     /// A get_formulas() call was made, returning the specified data
     GetFormulas { sheet_name: String, data: SheetData },
-    /// A _put() call was made with the specified data
-    _Put { sheet_name: String, data: SheetData },
+    /// A clear_ranges() call was made with the specified ranges
+    ClearRanges { ranges: Vec<String> },
+    /// A write_ranges() call was made with the specified data
+    WriteRanges { ranges: Vec<(String, SheetData)> },
+    /// A copy_spreadsheet() call was made with the specified name
+    CopySpreadsheet { new_name: String },
 }
 
 /// An implementation of the `Sheet` trait that does not use Google sheets. It can hold any data in
@@ -34,124 +63,315 @@ pub(crate) enum SheetCall {
 /// - Separate storage for values and formulas
 /// - Call history tracking for test assertions
 /// - Builder methods for easy test setup
+///
+/// A static state variable is used to provide access to the same in-memory, pretend "Google Sheet"
+/// across multiple operations. These are identified by `sheet_id` which is parsed from the
+/// `spreadsheet_url` in the `Config` object.
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TestSheet {
-    /// Value data for each sheet (what `get()` returns)
-    data: SheetDataMap,
-
-    /// Formula data for each sheet (what `get_formulas()` returns).
-    /// If a sheet is not present here, `get_formulas()` falls back to `data`.
-    formulas: SheetDataMap,
-
-    /// History of all calls made to this sheet. Uses RefCell for interior mutability
-    /// so we can record calls even through the `&mut self` trait methods.
-    call_history: RefCell<Vec<SheetCall>>,
+    name: String,
 }
 
 // These methods are used by tests in other modules (e.g., sync tests).
-// Allow dead_code until those tests are written.
-#[allow(dead_code)]
 impl TestSheet {
-    /// Create a new empty `TestSheet`.
-    pub(crate) fn new() -> Self {
-        Self {
-            data: HashMap::new(),
-            formulas: HashMap::new(),
-            call_history: RefCell::new(Vec::new()),
-        }
+    /// Creates a new empty `TestSheet` or, if the `TestSheet` already exists, provides access to it
+    /// without changing its data.
+    /// - `name` is the `sheet_id` from the `sheet_url` in `Config`.
+    #[cfg(test)]
+    pub(crate) fn new(name: impl Into<String>) -> Self {
+        let name = name.into();
+        let mut map = TEST_SHEETS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .expect("Error obtaining test mutex");
+
+        _ = map.entry(name.clone()).or_default();
+
+        Self { name }
     }
 
+    /// Creates a `TestSheet` with seed data if it doesn't already exist.
+    /// If the sheet already exists, returns access to it without modifying its data.
+    /// - `name` is the `sheet_id` from the `sheet_url` in `Config`.
+    pub(crate) fn new_with_seed_data(name: impl Into<String>) -> Self {
+        let name = name.into();
+        let mut map = TEST_SHEETS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .expect("Error obtaining test mutex");
+
+        // Only seed if the entry doesn't exist yet
+        map.entry(name.clone()).or_insert_with(|| {
+            let (data, formulas) = default_data();
+            TestSheetState {
+                data,
+                formulas,
+                call_history: RefCell::new(vec![]),
+            }
+        });
+
+        Self { name }
+    }
+
+    #[cfg(test)]
     /// Builder method: add value data for a sheet.
-    pub(crate) fn with_sheet(mut self, sheet_name: &str, data: SheetData) -> Self {
-        self.data.insert(sheet_name.to_string(), data);
+    pub(crate) fn with_sheet(self, sheet_name: &str, data: SheetData) -> Self {
+        let mut map = TEST_SHEETS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .expect("Error obtaining test mutex");
+        map.entry(self.name.clone())
+            .or_default()
+            .data
+            .insert(sheet_name.to_string(), data);
         self
     }
 
     /// Builder method: add formula data for a sheet.
     /// If not set, `get_formulas()` will return the same data as `get()`.
-    pub(crate) fn with_formulas(mut self, sheet_name: &str, formulas: SheetData) -> Self {
-        self.formulas.insert(sheet_name.to_string(), formulas);
+    #[cfg(test)]
+    pub(crate) fn with_formulas(self, sheet_name: &str, formulas: SheetData) -> Self {
+        let mut map = TEST_SHEETS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .expect("Error obtaining test mutex");
+        map.entry(self.name.clone())
+            .or_default()
+            .formulas
+            .insert(sheet_name.to_string(), formulas);
         self
     }
 
     /// Get the call history for test assertions.
+    #[cfg(test)]
     pub(crate) fn call_history(&self) -> Vec<SheetCall> {
-        self.call_history.borrow().clone()
+        let mut map = TEST_SHEETS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .expect("Error obtaining test mutex");
+        let vec = map
+            .entry(self.name.clone())
+            .or_default()
+            .call_history
+            .borrow()
+            .to_owned();
+        vec
     }
 
     /// Clear the call history (useful between test phases).
+    #[cfg(test)]
     pub(crate) fn clear_history(&self) {
-        self.call_history.borrow_mut().clear();
-    }
-
-    /// Get the current data for a sheet (useful for verifying _put results).
-    pub(crate) fn get_data(&self, sheet_name: &str) -> Option<&SheetData> {
-        self.data.get(sheet_name)
+        let mut map = TEST_SHEETS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .expect("Error obtaining test mutex");
+        map.entry(self.name.clone())
+            .or_default()
+            .call_history
+            .borrow_mut()
+            .clear();
     }
 
     /// Record a call to the history.
-    fn record_call(&self, call: SheetCall) {
-        self.call_history.borrow_mut().push(call);
+    fn record_call(
+        &self,
+        call: SheetCall,
+        mut map: MutexGuard<'_, HashMap<String, TestSheetState>>,
+    ) {
+        map.entry(self.name.clone())
+            .or_default()
+            .call_history
+            .borrow_mut()
+            .push(call);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn get_state(&self) -> TestSheetState {
+        let mut map = TEST_SHEETS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .expect("Error obtaining test mutex");
+        map.entry(self.name.clone()).or_default().clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_state(&self, state: TestSheetState) {
+        let mut map = TEST_SHEETS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .expect("Error obtaining test mutex");
+        map.insert(self.name.clone(), state);
     }
 }
 
 #[async_trait::async_trait]
 impl Sheet for TestSheet {
     async fn get(&mut self, sheet_name: &str) -> Result<SheetData> {
-        let data = self
+        let mut map = TEST_SHEETS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .expect("Error obtaining test mutex");
+
+        let data = map
+            .entry(self.name.clone())
+            .or_default()
             .data
             .get(sheet_name)
             .with_context(|| format!("Sheet '{sheet_name}' not found"))?
-            .clone();
+            .to_owned();
 
-        self.record_call(SheetCall::Get {
-            sheet_name: sheet_name.to_string(),
-            data: data.clone(),
-        });
+        self.record_call(
+            SheetCall::Get {
+                sheet_name: sheet_name.to_string(),
+                data: data.clone(),
+            },
+            map,
+        );
 
         Ok(data)
     }
 
     async fn get_formulas(&mut self, sheet_name: &str) -> Result<SheetData> {
-        // If formulas are explicitly set, use them; otherwise fall back to data
-        let data = if let Some(formula_data) = self.formulas.get(sheet_name) {
-            formula_data.clone()
+        let mut map = TEST_SHEETS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .expect("Error obtaining test mutex");
+
+        let data = if let Some(found) = map
+            .entry(self.name.clone())
+            .or_default()
+            .formulas
+            .get(sheet_name)
+        {
+            found.to_owned()
         } else {
-            self.data
+            map.entry(self.name.clone())
+                .or_default()
+                .data
                 .get(sheet_name)
                 .with_context(|| format!("Sheet '{sheet_name}' not found"))?
-                .clone()
+                .to_owned()
         };
 
-        self.record_call(SheetCall::GetFormulas {
-            sheet_name: sheet_name.to_string(),
-            data: data.clone(),
-        });
+        self.record_call(
+            SheetCall::GetFormulas {
+                sheet_name: sheet_name.to_string(),
+                data: data.clone(),
+            },
+            map,
+        );
 
         Ok(data)
     }
 
-    async fn _put(&mut self, sheet_name: &str, data: &[Vec<String>]) -> crate::Result<()> {
-        let data_vec = data.to_vec();
+    async fn clear_ranges(&mut self, ranges: &[&str]) -> Result<()> {
+        let mut map = TEST_SHEETS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .expect("Error obtaining test mutex");
 
-        self.record_call(SheetCall::_Put {
-            sheet_name: sheet_name.to_string(),
-            data: data_vec.clone(),
-        });
+        // For each range, parse the sheet name and clear the appropriate rows
+        for range in ranges {
+            if let Some(sheet_name) = range.split('!').next() {
+                // Clear the data for this sheet (except header if range starts at A2)
+                if let Some(sheet_data) = map
+                    .entry(self.name.clone())
+                    .or_default()
+                    .data
+                    .get_mut(sheet_name)
+                {
+                    // If range contains "A2:", keep header row, clear rest
+                    if range.contains("A2:") || range.contains("!A2") {
+                        if !sheet_data.is_empty() {
+                            sheet_data.truncate(1); // Keep only header
+                        }
+                    } else {
+                        sheet_data.clear();
+                    }
+                }
+            }
+        }
 
-        self.data.insert(sheet_name.to_string(), data_vec);
+        self.record_call(
+            SheetCall::ClearRanges {
+                ranges: ranges.iter().map(|s| s.to_string()).collect(),
+            },
+            map,
+        );
+
         Ok(())
     }
-}
 
-impl Default for TestSheet {
-    /// Loads seed data from this module, including formulas for the Transactions sheet.
-    fn default() -> Self {
-        let (data, formulas) = default_data();
-        Self {
-            data,
-            formulas,
-            call_history: RefCell::new(Vec::new()),
+    async fn write_ranges(&mut self, data: &[SheetRange]) -> Result<()> {
+        let mut map = TEST_SHEETS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .expect("Error obtaining test mutex");
+
+        let mut recorded_ranges = Vec::new();
+
+        for sheet_range in data {
+            if let Some(sheet_name) = sheet_range.range.split('!').next() {
+                recorded_ranges.push((sheet_range.range.clone(), sheet_range.values.clone()));
+
+                let state = map.entry(self.name.clone()).or_default();
+
+                // Get or create the sheet data
+                let sheet_data = state.data.entry(sheet_name.to_string()).or_default();
+
+                // If range starts at A1, replace all data with the provided values
+                if sheet_range.range.contains("A1:") || sheet_range.range.ends_with("!A1") {
+                    *sheet_data = sheet_range.values.clone();
+                } else if sheet_range.range.contains("A2:") {
+                    // If range starts at A2, preserve header and replace/append data
+                    let header = if !sheet_data.is_empty() {
+                        Some(sheet_data[0].clone())
+                    } else {
+                        None
+                    };
+                    sheet_data.clear();
+                    if let Some(h) = header {
+                        sheet_data.push(h);
+                    }
+                    for row in &sheet_range.values {
+                        sheet_data.push(row.clone());
+                    }
+                } else {
+                    // Default: append data rows
+                    for row in &sheet_range.values {
+                        sheet_data.push(row.clone());
+                    }
+                }
+            }
         }
+
+        self.record_call(
+            SheetCall::WriteRanges {
+                ranges: recorded_ranges,
+            },
+            map,
+        );
+
+        Ok(())
+    }
+
+    async fn copy_spreadsheet(&mut self, new_name: &str) -> Result<String> {
+        let map = TEST_SHEETS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .expect("Error obtaining test mutex");
+
+        // Generate a fake file ID for the copy
+        let fake_file_id = format!("test-copy-{}", uuid::Uuid::new_v4());
+
+        self.record_call(
+            SheetCall::CopySpreadsheet {
+                new_name: new_name.to_string(),
+            },
+            map,
+        );
+
+        Ok(fake_file_id)
     }
 }
 
@@ -274,7 +494,7 @@ mod tests {
     #[tokio::test]
     async fn test_builder_and_call_history() {
         // Build a TestSheet with custom data
-        let mut sheet = TestSheet::new()
+        let mut sheet = TestSheet::new("test_builder_and_call_history")
             .with_sheet(
                 "TestTab",
                 vec![
@@ -313,20 +533,6 @@ mod tests {
             matches!(&history[1], SheetCall::GetFormulas { sheet_name, .. } if sheet_name == "TestTab")
         );
 
-        // Call _put and verify it updates data and is recorded
-        let new_data = vec![vec!["NewHeader".to_string()], vec!["NewValue".to_string()]];
-        sheet._put("TestTab", &new_data).await.unwrap();
-
-        // Verify _put updated the stored data
-        let stored = sheet.get_data("TestTab").unwrap();
-        assert_eq!(stored[0][0], "NewHeader");
-
-        let history = sheet.call_history();
-        assert_eq!(history.len(), 3);
-        assert!(
-            matches!(&history[2], SheetCall::_Put { sheet_name, .. } if sheet_name == "TestTab")
-        );
-
         // Test clear_history
         sheet.clear_history();
         assert!(sheet.call_history().is_empty());
@@ -335,7 +541,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_formulas_falls_back_to_data() {
         // When formulas are not set, get_formulas should return the same as get
-        let mut sheet = TestSheet::new().with_sheet(
+        let mut sheet = TestSheet::new("test_get_formulas_falls_back_to_data").with_sheet(
             "NoFormulas",
             vec![
                 vec!["A".to_string(), "B".to_string()],
