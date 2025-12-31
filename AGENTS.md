@@ -55,11 +55,29 @@ Glossary:
 - BACKUP: work related to backup logic
 - SQL: work related to the SQLite datastore
 
-Next Steps:
+### Next Steps:
 
-- [X] A human needs to test `tiller sync up` to see if it actually works
-- [ ] Add a CLI interface for querying, updating, deleting and inserting records
-- [ ] Begin working on the MCP interface
+#### MCP Implementation:
+
+- [X] Update DESIGN.md with MCP section
+- [ ] Migrate from `log`/`env_logger` to `tracing`/`tracing-subscriber`
+- [ ] Create public error type in `error.rs` supporting `isError` pattern
+- [ ] Add `rmcp` dependency to Cargo.toml
+- [ ] Add `tiller mcp` subcommand to CLI args
+- [ ] Create `src/mcp/mod.rs` module structure
+- [ ] Implement MCP server with stdio transport
+- [ ] Write integration test for stdio transport
+- [ ] Implement `sync_down` tool wrapper
+- [ ] Write unit tests for MCP `sync_down` tool
+- [ ] Add MCP logging notifications for important messages
+- [ ] Implement `sync_up` tool wrapper (with `force`, `formulas` params)
+- [ ] Write unit tests for MCP `sync_up` tool
+- [ ] Write unit tests for MCP handlers
+
+#### Further Development
+
+- [ ] Design and implement an interface, both CLI and MCP, for querying, updating, deleting and
+  inserting records
 
 ## Instruction Imports
 
