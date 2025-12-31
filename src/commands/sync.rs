@@ -6,7 +6,9 @@ use crate::{Config, Result};
 use anyhow::anyhow;
 use tracing::{debug, info, warn};
 
-pub async fn sync_down(config: Config, mode: Mode) -> Result<()> {
+/// Gets data from the tiller Google sheet and persists it to the local datastore. Returns an info
+/// message that can be printed for the user.
+pub async fn sync_down(config: Config, mode: Mode) -> Result<String> {
     // Backup SQLite database before modifying
     let sqlite_backup = config
         .backup()
@@ -35,22 +37,22 @@ pub async fn sync_down(config: Config, mode: Mode) -> Result<()> {
         .await
         .pub_result(ErrorType::Database)?;
 
-    info!(
-        "Synced {} transactions, {} categories, {} autocat rules from sheet to database",
+    Ok(format!(
+        "Synced {} transactions, {} categories, {} autocat rules from sheet to local datastore",
         tiller_data.transactions.data().len(),
         tiller_data.categories.data().len(),
         tiller_data.auto_cats.data().len()
-    );
-
-    Ok(())
+    ))
 }
 
+/// Sends data from the local datastore to the Google sheet, returns a message that can be printed
+/// for the user.
 pub async fn sync_up(
     config: Config,
     mode: Mode,
     force: bool,
     formulas_mode: FormulasMode,
-) -> Result<()> {
+) -> Result<String> {
     // Precondition: verify database has transactions
     if config
         .db()
@@ -185,7 +187,11 @@ pub async fn sync_up(
         "Synced {} transactions, {} categories, {} autocat rules to sheet",
         txn_count, cat_count, ac_count
     );
-    Ok(())
+
+    Ok(format!(
+        "Synced {txn_count} transactions, {cat_count} categories, {ac_count} autocat rules \
+        from local datastore to sheet",
+    ))
 }
 
 #[cfg(test)]

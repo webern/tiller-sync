@@ -64,7 +64,7 @@ where
             use std::fs::Permissions;
             use std::os::unix::fs::PermissionsExt;
             if let Err(e) = std::fs::set_permissions(&self.path, Permissions::from_mode(0o600)) {
-                warn!("Failed to set safer permission on the secrets file: {e}");
+                warn!("Failed to set safer permissions on the secrets file: {e}");
             }
         }
 

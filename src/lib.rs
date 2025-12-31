@@ -5,6 +5,7 @@ pub mod commands;
 mod config;
 mod db;
 mod error;
+pub mod mcp;
 pub mod model;
 mod utils;
 

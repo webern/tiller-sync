@@ -2,7 +2,7 @@ use clap::Parser;
 use std::process::ExitCode;
 use tiller_sync::args::{Args, Command, UpDown};
 use tiller_sync::{commands, Config, Mode, Result};
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info, trace};
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::EnvFilter;
 
@@ -44,19 +44,26 @@ pub async fn main_inner(args: Args) -> Result<()> {
                 commands::auth(&config).await
             }
         }
-        Command::Sync(sync_args) => match sync_args.direction() {
-            UpDown::Up => {
-                let formulas_mode = commands::FormulasMode::Unknown;
-                commands::sync_up(
-                    Config::load(home).await?,
-                    mode,
-                    sync_args.force(),
-                    formulas_mode,
-                )
-                .await
-            }
-            UpDown::Down => commands::sync_down(Config::load(home).await?, mode).await,
-        },
+        Command::Sync(sync_args) => {
+            let message = match sync_args.direction() {
+                UpDown::Up => {
+                    commands::sync_up(
+                        Config::load(home).await?,
+                        mode,
+                        sync_args.force(),
+                        sync_args.formulas(),
+                    )
+                    .await?
+                }
+                UpDown::Down => commands::sync_down(Config::load(home).await?, mode).await?,
+            };
+            info!("{message}");
+            Ok(())
+        }
+        Command::Mcp(_mcp_args) => {
+            let config = Config::load(home).await?;
+            commands::mcp(config, mode).await
+        }
     }
 }
 

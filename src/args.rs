@@ -1,5 +1,6 @@
 //! These structs provide the CLI interface for the tiller CLI.
 
+use crate::commands::FormulasMode;
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
@@ -67,6 +68,11 @@ pub enum Command {
     Auth(AuthArgs),
     /// Upload or Download Transactions, Categories and AutoCat tabs to/from your Tiller Sheet.
     Sync(SyncArgs),
+    /// Run as an MCP (Model Context Protocol) server for AI agent integration.
+    ///
+    /// This launches a long-running process that communicates via JSON-RPC over stdin/stdout.
+    /// MCP clients (like Claude Code) launch this as a subprocess.
+    Mcp(McpArgs),
 }
 
 /// Arguments common to all subcommands.
@@ -176,6 +182,13 @@ pub struct SyncArgs {
     /// Force sync up even if conflicts are detected or sync-down backup is missing
     #[arg(long)]
     force: bool,
+
+    /// How to handle formulas during sync up: unknown, preserve, or ignore.
+    /// - unknown: Error if formulas exist (default)
+    /// - preserve: Write formulas back to original positions
+    /// - ignore: Skip all formulas, only write values
+    #[arg(long, value_enum, default_value_t = FormulasMode::Unknown)]
+    formulas: FormulasMode,
 }
 
 impl SyncArgs {
@@ -185,6 +198,7 @@ impl SyncArgs {
             client_secret: secret,
             oauth_token: oath_token,
             force: false,
+            formulas: FormulasMode::Unknown,
         }
     }
 
@@ -203,6 +217,17 @@ impl SyncArgs {
     pub fn force(&self) -> bool {
         self.force
     }
+
+    pub fn formulas(&self) -> FormulasMode {
+        self.formulas
+    }
+}
+
+/// Args for the `tiller mcp` command.
+#[derive(Debug, Parser, Clone, Default)]
+pub struct McpArgs {
+    // No additional arguments for now.
+    // The --tiller-home flag is inherited from Common.
 }
 
 fn default_tiller_home() -> DisplayPath {

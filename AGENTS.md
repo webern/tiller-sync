@@ -57,27 +57,8 @@ Glossary:
 
 ### Next Steps:
 
-#### MCP Implementation:
-
-- [X] Update DESIGN.md with MCP section
-- [X] Migrate from `log`/`env_logger` to `tracing`/`tracing-subscriber`
-- [X] Create public error type in `error.rs` supporting `isError` pattern
-- [ ] Add `rmcp` dependency to Cargo.toml
-- [ ] Add `tiller mcp` subcommand to CLI args
-- [ ] Create `src/mcp/mod.rs` module structure
-- [ ] Implement MCP server with stdio transport
-- [ ] Write integration test for stdio transport
-- [ ] Implement `sync_down` tool wrapper
-- [ ] Write unit tests for MCP `sync_down` tool
-- [ ] Add MCP logging notifications for important messages
-- [ ] Implement `sync_up` tool wrapper (with `force`, `formulas` params)
-- [ ] Write unit tests for MCP `sync_up` tool
-- [ ] Write unit tests for MCP handlers
-
-#### Further Development
-
-- [ ] Design and implement an interface, both CLI and MCP, for querying, updating, deleting and
-  inserting records
+- [ ] Design an interface, both CLI and MCP, for querying, updating, deleting and inserting records
+- [ ] Implement the above, with tests
 
 ## Instruction Imports
 
@@ -108,6 +89,24 @@ add a line like the following below:
 NEVER use `unwrap`, `expect` or any other functions that can explicitly panic in production code (
 it's fine in test code only, NEVER in production code).
 
+PREFER using an underscore to silence dead_code warnings. Do not use `#[allow(dead_code)]`.
+
+### MCP `rmpc` and `schemars` Descriptions
+
+- ALWAYS write descriptions in doc comments.
+- NEVER use the `description` field of `rmpc` derive macros (such as the `tool`, `schemars`, or
+  `JsonSchema` macros).
+
+### MCP Server Documentation Files
+
+The MCP server has two important documentation files in `src/mcp/docs/`:
+
+- **`INTRO.md`**: Brief description shown to the AI client upon MCP server initialization (via
+  `ServerInfo.instructions`). Keep this concise.
+- **`INSTRUCTIONS.md`**: In-depth usage guide that the agent must read before using tools. This is
+  returned by the `initialize_service` tool and contains detailed information about workflows,
+  parameters, and best practices.
+
 ## Build and Development Commands
 
 When writing or editing Rust code, always run the following commands before you report that you are
@@ -125,18 +124,7 @@ You can quickly check your syntax without compiling with:
 
 - `cargo check`
 
-## Prohibited Dependencies
-
-**NEVER add the following crates to this project:**
-
-- `yup-oauth2` - We implement OAuth manually using the `oauth2` crate for full control over the user
-  authentication flow
-- `google-sheets4` - This crate is tightly coupled to `yup-oauth2` and lacks the control we need
-  over
-  the OAuth interaction
-
-**Rationale:** These libraries do not provide sufficient control over when and how the OAuth browser
-interaction occurs.
+## Dependencies
 
 **ALWAYS ASK THE USER ABOUT NEW DEPENDENCIES**: When you are considering adding a new dependency to
 Cargo.toml, ask the user first.
