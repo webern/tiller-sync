@@ -1,10 +1,13 @@
 # Tiller Sync
 
-⚠️: Not ready yet!
+⚠️ Not ready yet!
 
 A program for syncing data between a [tiller] Google Sheet and a local SQLite database.
 With it you can download your transactions, make edits to them locally in SQLite, then sync back the
 changes (this part is hard, TBD!)
+
+Current Status: `tiller sync down` and `tiller sync up` are working. Not done, additional commands
+and MCP server.
 
 ## Table of Contents
 
