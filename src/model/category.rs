@@ -1,5 +1,5 @@
+use crate::error::Res;
 use crate::model::items::{Item, Items};
-use crate::Result;
 use anyhow::bail;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -24,7 +24,7 @@ pub struct Category {
 }
 
 impl Item for Category {
-    fn set_with_header<S1, S2>(&mut self, header: S1, value: S2) -> Result<()>
+    fn set_with_header<S1, S2>(&mut self, header: S1, value: S2) -> Res<()>
     where
         S1: AsRef<str>,
         S2: Into<String>,
@@ -84,7 +84,7 @@ serde_plain::derive_display_from_serialize!(CategoryColumn);
 serde_plain::derive_fromstr_from_deserialize!(CategoryColumn);
 
 impl CategoryColumn {
-    pub fn from_header(header: impl AsRef<str>) -> Result<CategoryColumn> {
+    pub fn from_header(header: impl AsRef<str>) -> Res<CategoryColumn> {
         let header_str = header.as_ref();
         match header_str {
             CATEGORY_STR => Ok(CategoryColumn::Category),

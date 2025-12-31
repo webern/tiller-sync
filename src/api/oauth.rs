@@ -1,6 +1,6 @@
 use crate::api::files::{File, SecretFile, TokenFile};
 use crate::api::OAUTH_SCOPES;
-use crate::Result;
+use crate::error::Res;
 use anyhow::{anyhow, bail, Context};
 use chrono::Utc;
 use hyper::StatusCode;
@@ -48,7 +48,7 @@ impl TokenProvider {
     ///
     /// # Errors
     /// - If any of the file operations, network operations, or logical checks fail.
-    pub(crate) async fn initialize<P1, P2>(secret: P1, token: P2) -> Result<Self>
+    pub(crate) async fn initialize<P1, P2>(secret: P1, token: P2) -> Res<Self>
     where
         P1: Into<PathBuf>,
         P2: Into<PathBuf>,
@@ -159,7 +159,7 @@ impl TokenProvider {
     ///
     /// # Errors
     /// - If any of the file operations, network operations, or logical checks fail.
-    pub(crate) async fn load<P1, P2>(secret: P1, token: P2) -> Result<Self>
+    pub(crate) async fn load<P1, P2>(secret: P1, token: P2) -> Res<Self>
     where
         P1: Into<PathBuf>,
         P2: Into<PathBuf>,
@@ -192,7 +192,7 @@ impl TokenProvider {
     /// - If the token refresh is successful, updates the state of `self` with it, and saves it to
     ///   our token file path.
     /// - Returns the `token` for the sheets client to use.
-    pub(super) async fn token_with_refresh(&mut self) -> Result<&str> {
+    pub(super) async fn token_with_refresh(&mut self) -> Res<&str> {
         // Check if token needs refresh
         if !self.token.data().is_expired() {
             return Ok(self.token.data().access_token());
@@ -205,7 +205,7 @@ impl TokenProvider {
     }
 
     /// Forces a refresh whether or not the token is expired.
-    pub(crate) async fn refresh(&mut self) -> Result<&str> {
+    pub(crate) async fn refresh(&mut self) -> Res<&str> {
         // Create OAuth client
         let oauth_client = create_oauth_client(self.secret.data())?;
 
@@ -298,7 +298,7 @@ type GoogleOAuthClient = oauth2::Client<
 >;
 
 /// Create an OAuth client from the secret file
-fn create_oauth_client(secret: &SecretFile) -> Result<GoogleOAuthClient> {
+fn create_oauth_client(secret: &SecretFile) -> Res<GoogleOAuthClient> {
     let client_id = ClientId::new(secret.client_id().to_string());
     let client_secret = ClientSecret::new(secret.client_secret().to_string());
     let auth_url = AuthUrl::new(secret.auth_uri().to_string())
@@ -313,14 +313,14 @@ fn create_oauth_client(secret: &SecretFile) -> Result<GoogleOAuthClient> {
 }
 
 /// Bind to a random available port
-fn bind_random_port() -> Result<(TcpListener, u16)> {
+fn bind_random_port() -> Res<(TcpListener, u16)> {
     let listener = TcpListener::bind("127.0.0.1:0").context("Failed to bind to local address")?;
     let port = listener.local_addr()?.port();
     Ok((listener, port))
 }
 
 /// Attempt to open the authorization URL in the default browser
-fn open_browser(url: &str) -> Result<()> {
+fn open_browser(url: &str) -> Res<()> {
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open").arg(url).spawn()?;
@@ -339,14 +339,14 @@ fn open_browser(url: &str) -> Result<()> {
 }
 
 /// Run HTTP server to receive OAuth callback
-async fn receive_oauth_callback(listener: TcpListener, expected_csrf: CsrfToken) -> Result<String> {
+async fn receive_oauth_callback(listener: TcpListener, expected_csrf: CsrfToken) -> Res<String> {
     use hyper::server::conn::http1;
     use hyper::service::service_fn;
     use hyper::{Request, Response};
     use hyper_util::rt::TokioIo;
 
     // Wrap the auth code in Arc<Mutex> so we can share it between handler invocations
-    let auth_code_result: Arc<Mutex<Option<Result<String>>>> = Arc::new(Mutex::new(None));
+    let auth_code_result: Arc<Mutex<Option<Res<String>>>> = Arc::new(Mutex::new(None));
 
     let auth_code_clone = auth_code_result.clone();
     let expected_csrf_clone = expected_csrf.clone();

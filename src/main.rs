@@ -1,8 +1,7 @@
 use clap::Parser;
 use std::process::ExitCode;
 use tiller_sync::args::{Args, Command, UpDown};
-use tiller_sync::{commands, Mode};
-use tiller_sync::{Config, Result};
+use tiller_sync::{commands, Config, Mode, Result};
 use tracing::{debug, error, trace};
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::EnvFilter;
@@ -17,7 +16,7 @@ async fn main() -> ExitCode {
     match main_inner(args).await {
         Ok(_) => ExitCode::SUCCESS,
         Err(e) => {
-            error!("Exiting with error: {e:?}");
+            error!("Exiting with error: {e}");
             ExitCode::FAILURE
         }
     }

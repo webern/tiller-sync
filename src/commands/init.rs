@@ -1,4 +1,4 @@
-use crate::Config;
+use crate::{Config, Result};
 use anyhow::Context;
 use std::path::Path;
 
@@ -16,7 +16,7 @@ use std::path::Path;
 ///
 /// # Errors
 /// - Returns an error if any file operations fail.
-pub async fn init(tiller_home: &Path, secret_file: &Path, sheet_url: &str) -> crate::Result<()> {
+pub async fn init(tiller_home: &Path, secret_file: &Path, sheet_url: &str) -> Result<()> {
     let _config = Config::create(tiller_home, secret_file, sheet_url)
         .await
         .context("Unable to create the data directory and configs");

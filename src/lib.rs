@@ -10,5 +10,4 @@ mod utils;
 
 pub use api::Mode;
 pub use config::Config;
-pub use error::Error;
-pub use error::Result;
+pub use error::{Result, TillerError};

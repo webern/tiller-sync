@@ -1,7 +1,8 @@
 //! Implements the `Sheet` trait using the `sheets:Client` to interact with a Google sheet.
 
 use crate::api::{Sheet, SheetRange, TokenProvider};
-use crate::{Config, Result};
+use crate::error::Res;
+use crate::Config;
 use anyhow::Context;
 use sheets::types::{
     BatchClearValuesRequest, BatchUpdateValuesRequest, DateTimeRenderOption, Dimension,
@@ -19,7 +20,7 @@ pub(super) struct GoogleSheet {
 }
 
 impl GoogleSheet {
-    pub(super) async fn new(config: Config, mut token_provider: TokenProvider) -> Result<Self> {
+    pub(super) async fn new(config: Config, mut token_provider: TokenProvider) -> Res<Self> {
         let client = create_sheets_client(&mut token_provider).await?;
         Ok(Self {
             config,
@@ -29,7 +30,7 @@ impl GoogleSheet {
     }
 
     /// Refreshes the sheets client with a new access token if needed
-    async fn refresh_client(&mut self) -> Result<()> {
+    async fn refresh_client(&mut self) -> Res<()> {
         self.client = create_sheets_client(&mut self.token_provider).await?;
         Ok(())
     }
@@ -37,7 +38,7 @@ impl GoogleSheet {
 
 #[async_trait::async_trait]
 impl Sheet for GoogleSheet {
-    async fn get(&mut self, sheet_name: &str) -> Result<Vec<Vec<String>>> {
+    async fn get(&mut self, sheet_name: &str) -> Res<Vec<Vec<String>>> {
         trace!("get for {sheet_name}");
         self.refresh_client().await?;
         let range = format!("{sheet_name}!A:ZZ"); // Get all columns
@@ -57,7 +58,7 @@ impl Sheet for GoogleSheet {
         Ok(response.body.values)
     }
 
-    async fn get_formulas(&mut self, sheet_name: &str) -> Result<Vec<Vec<String>>> {
+    async fn get_formulas(&mut self, sheet_name: &str) -> Res<Vec<Vec<String>>> {
         trace!("get_formulas for {sheet_name}");
         self.refresh_client().await?;
         let range = format!("{sheet_name}!A:ZZ"); // Get all columns
@@ -77,7 +78,7 @@ impl Sheet for GoogleSheet {
         Ok(response.body.values)
     }
 
-    async fn clear_ranges(&mut self, ranges: &[&str]) -> Result<()> {
+    async fn clear_ranges(&mut self, ranges: &[&str]) -> Res<()> {
         self.refresh_client().await?;
         let request = BatchClearValuesRequest {
             ranges: ranges.iter().map(|s| s.to_string()).collect(),
@@ -91,7 +92,7 @@ impl Sheet for GoogleSheet {
         Ok(())
     }
 
-    async fn write_ranges(&mut self, data: &[SheetRange]) -> Result<()> {
+    async fn write_ranges(&mut self, data: &[SheetRange]) -> Res<()> {
         self.refresh_client().await?;
         let value_ranges: Vec<ValueRange> = data
             .iter()
@@ -119,7 +120,7 @@ impl Sheet for GoogleSheet {
         Ok(())
     }
 
-    async fn copy_spreadsheet(&mut self, new_name: &str) -> Result<String> {
+    async fn copy_spreadsheet(&mut self, new_name: &str) -> Res<String> {
         self.refresh_client().await?;
 
         // Use Google Drive API to copy the spreadsheet
@@ -170,7 +171,7 @@ impl Sheet for GoogleSheet {
 }
 
 /// Creates a new sheets client with a refreshed access token.
-async fn create_sheets_client(token_provider: &mut TokenProvider) -> Result<sheets::Client> {
+async fn create_sheets_client(token_provider: &mut TokenProvider) -> Res<sheets::Client> {
     // Get the access token (will refresh if needed)
     let access_token = token_provider.token_with_refresh().await?;
 

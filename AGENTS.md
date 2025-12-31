@@ -61,7 +61,7 @@ Glossary:
 
 - [X] Update DESIGN.md with MCP section
 - [X] Migrate from `log`/`env_logger` to `tracing`/`tracing-subscriber`
-- [ ] Create public error type in `error.rs` supporting `isError` pattern
+- [X] Create public error type in `error.rs` supporting `isError` pattern
 - [ ] Add `rmcp` dependency to Cargo.toml
 - [ ] Add `tiller mcp` subcommand to CLI args
 - [ ] Create `src/mcp/mod.rs` module structure

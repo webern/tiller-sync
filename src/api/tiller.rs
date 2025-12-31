@@ -1,8 +1,8 @@
 //! Implements the `Tiller` trait for interacting with Google sheet data from a tiller sheet.
 
 use crate::api::{Sheet, SheetRange, Tiller, AUTO_CAT, CATEGORIES, TRANSACTIONS};
+use crate::error::Res;
 use crate::model::{AutoCats, Categories, TillerData, Transactions};
-use crate::Result;
 
 /// Implements the `Tiller` trait for interacting with Google sheet data from a tiller sheet.
 pub(super) struct TillerImpl {
@@ -12,14 +12,14 @@ pub(super) struct TillerImpl {
 impl TillerImpl {
     /// Create a new `TillerImpl` object that will use a dynamically-dispatched `sheet` to get and
     /// send its data.
-    pub(super) async fn new(sheet: Box<dyn Sheet + Send>) -> Result<Self> {
+    pub(super) async fn new(sheet: Box<dyn Sheet + Send>) -> Res<Self> {
         Ok(Self { sheet })
     }
 }
 
 #[async_trait::async_trait]
 impl Tiller for TillerImpl {
-    async fn get_data(&mut self) -> Result<TillerData> {
+    async fn get_data(&mut self) -> Res<TillerData> {
         // Fetch data from all three tabs
         let transactions = fetch_transactions(self.sheet.as_mut()).await?;
         let categories = fetch_categories(self.sheet.as_mut()).await?;
@@ -32,11 +32,11 @@ impl Tiller for TillerImpl {
         })
     }
 
-    async fn copy_spreadsheet(&mut self, new_name: &str) -> Result<String> {
+    async fn copy_spreadsheet(&mut self, new_name: &str) -> Res<String> {
         self.sheet.copy_spreadsheet(new_name).await
     }
 
-    async fn clear_and_write_data(&mut self, data: &TillerData) -> Result<()> {
+    async fn clear_and_write_data(&mut self, data: &TillerData) -> Res<()> {
         // Clear each tab entirely (headers and data)
         let clear_ranges = [
             &format!("{TRANSACTIONS}!A1:ZZ"),
@@ -76,7 +76,7 @@ impl Tiller for TillerImpl {
         Ok(())
     }
 
-    async fn verify_write(&mut self, expected: &TillerData) -> Result<(usize, usize, usize)> {
+    async fn verify_write(&mut self, expected: &TillerData) -> Res<(usize, usize, usize)> {
         use anyhow::bail;
 
         // Re-fetch data from sheets to verify row counts
@@ -119,21 +119,21 @@ impl Tiller for TillerImpl {
 }
 
 /// Fetches transaction data from the Transactions tab
-async fn fetch_transactions(client: &mut (dyn Sheet + Send)) -> Result<Transactions> {
+async fn fetch_transactions(client: &mut (dyn Sheet + Send)) -> Res<Transactions> {
     let values = client.get(TRANSACTIONS).await?;
     let formulas = client.get_formulas(TRANSACTIONS).await?;
     Transactions::parse(values, formulas)
 }
 
 /// Fetches category data from the Categories tab
-async fn fetch_categories(client: &mut (dyn Sheet + Send)) -> Result<Categories> {
+async fn fetch_categories(client: &mut (dyn Sheet + Send)) -> Res<Categories> {
     let values = client.get(CATEGORIES).await?;
     let formulas = client.get_formulas(CATEGORIES).await?;
     Categories::parse(values, formulas)
 }
 
 /// Fetches AutoCat data from the AutoCat tab
-async fn fetch_auto_cats(client: &mut (dyn Sheet + Send)) -> Result<AutoCats> {
+async fn fetch_auto_cats(client: &mut (dyn Sheet + Send)) -> Res<AutoCats> {
     let values = client.get(AUTO_CAT).await?;
     let formulas = client.get_formulas(AUTO_CAT).await?;
     AutoCats::parse(values, formulas)

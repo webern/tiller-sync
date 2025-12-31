@@ -1,5 +1,5 @@
+use crate::error::Res;
 use crate::model::{Mapping, RowCol};
-use crate::Result;
 use anyhow::{bail, Context};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -23,7 +23,7 @@ where
 
 pub trait Item {
     /// Given the `header` name and the `value`, set the appropriate struct field.
-    fn set_with_header<S1, S2>(&mut self, header: S1, value: S2) -> Result<()>
+    fn set_with_header<S1, S2>(&mut self, header: S1, value: S2) -> Res<()>
     where
         S1: AsRef<str>,
         S2: Into<String>;
@@ -46,7 +46,7 @@ pub trait Item {
     fn get_original_order(&self) -> Option<u64>;
 }
 
-fn parse_row<S1, S2, Iter, T>(headers: &[S1], values: Iter, original_order: u64) -> Result<T>
+fn parse_row<S1, S2, Iter, T>(headers: &[S1], values: Iter, original_order: u64) -> Res<T>
 where
     S1: AsRef<str>,
     S2: Into<String>,
@@ -74,7 +74,7 @@ where
     ///
     /// These generics are confusing, but think of it like this: both `sheet_data` and
     /// `formula_data` are iterators into something that looks like `Vec<Vec<String>>`, i.e. rows.
-    pub(crate) fn parse<S, R, I1, I2>(sheet_data: I1, formula_data: I2) -> Result<Self>
+    pub(crate) fn parse<S, R, I1, I2>(sheet_data: I1, formula_data: I2) -> Res<Self>
     where
         S: Into<String>,
         R: IntoIterator<Item = S>,
@@ -135,7 +135,7 @@ where
         data: Vec<I>,
         formulas: BTreeMap<RowCol, String>,
         mapping: Mapping,
-    ) -> Result<Self> {
+    ) -> Res<Self> {
         if mapping.headers().is_empty() {
             bail!("We cannot proceed without headers.")
         }
@@ -150,7 +150,7 @@ where
     /// Converts the transactions to rows suitable for writing to a Google Sheet.
     /// Returns (headers, data_rows) where headers is the column names and data_rows
     /// contains the transaction data in the same column order.
-    pub(crate) fn to_rows(&self) -> Result<Vec<Vec<String>>> {
+    pub(crate) fn to_rows(&self) -> Res<Vec<Vec<String>>> {
         // Use mapping headers if available, otherwise use default headers
         let headers: Vec<String> = if self.mapping().headers().is_empty() {
             bail!("The headers are missing")
