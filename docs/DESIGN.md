@@ -506,21 +506,38 @@ The SQLite database contains the following tables. See `src/db/migrations/` for 
 
 - Primary key: `transaction_id` (Tiller-assigned or `user-` prefixed local UUID)
 - Indexed on: `date`, `account`, `category`, `description`
+- Foreign key: `category` references `categories(category)` with `ON UPDATE CASCADE ON DELETE
+  RESTRICT`
 
 **categories** - Budget categories from the Tiller Categories sheet.
 
-- Primary key: `id` (synthetic auto-increment)
-- Unique constraint on `category` (allows renaming categories)
+- Primary key: `category` (the category name itself)
 
 **autocat** - Automatic categorization rules from the Tiller AutoCat sheet.
 
 - Primary key: `id` (synthetic auto-increment)
+- Foreign key: `category` references `categories(category)` with `ON UPDATE CASCADE ON DELETE
+  RESTRICT`
 
 All three data tables include:
 
 - `original_order INTEGER` - Row position from last sync down (0-indexed); NULL for locally-added
   rows. Used for formula preservation.
 - `other_fields TEXT` - JSON object storing unknown/custom columns keyed by original header name.
+
+### Foreign Key Semantics
+
+The foreign key constraints enforce referential integrity between transactions/autocat and
+categories:
+
+- **ON UPDATE CASCADE**: When a category is renamed, all transactions and autocat rules referencing
+  that category are automatically updated to use the new name.
+- **ON DELETE RESTRICT**: A category cannot be deleted if any transactions or autocat rules
+  reference it. Those references must be updated or removed first.
+
+**Bulk sync operations**: During `sync down` and `sync up`, foreign key constraints are temporarily
+disabled using `PRAGMA foreign_keys = OFF` to allow the efficient delete-all-then-insert pattern for
+categories and autocat. The data from Tiller's Google Sheet is assumed to be internally consistent.
 
 ### Metadata Tables
 

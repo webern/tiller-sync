@@ -1,4 +1,24 @@
 -- Migration 01: Create transactions, categories, and autocat tables
+--
+-- Foreign Key Design:
+-- - categories.category is the primary key (category name is unique identifier)
+-- - transactions.category references categories.category with ON UPDATE CASCADE
+-- - autocat.category references categories.category with ON UPDATE CASCADE
+-- - ON DELETE RESTRICT prevents deleting categories that are in use
+--
+-- Note: During bulk sync operations (sync down/up), foreign key constraints are
+-- temporarily disabled using PRAGMA foreign_keys = OFF to allow efficient
+-- delete-all-then-insert patterns.
+
+-- Categories must be created first since transactions and autocat reference it
+CREATE TABLE categories (
+    category          TEXT PRIMARY KEY,
+    category_group    TEXT,
+    type              TEXT,
+    hide_from_reports TEXT,
+    original_order    INTEGER,
+    other_fields      TEXT
+);
 
 CREATE TABLE transactions (
     transaction_id   TEXT PRIMARY KEY,
@@ -16,7 +36,7 @@ CREATE TABLE transactions (
     date_added       TEXT,
     merchant_name    TEXT,
     category_hint    TEXT,
-    category         TEXT,
+    category         TEXT REFERENCES categories(category) ON UPDATE CASCADE ON DELETE RESTRICT,
     note             TEXT,
     tags             TEXT,
     categorized_date TEXT,
@@ -31,19 +51,9 @@ CREATE INDEX idx_transactions_account ON transactions (account);
 CREATE INDEX idx_transactions_category ON transactions (category);
 CREATE INDEX idx_transactions_description ON transactions (description);
 
-CREATE TABLE categories (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    category          TEXT NOT NULL UNIQUE,
-    category_group    TEXT,
-    type              TEXT,
-    hide_from_reports TEXT,
-    original_order    INTEGER,
-    other_fields      TEXT
-);
-
 CREATE TABLE autocat (
     id                        INTEGER PRIMARY KEY AUTOINCREMENT,
-    category                  TEXT,
+    category                  TEXT REFERENCES categories(category) ON UPDATE CASCADE ON DELETE RESTRICT,
     description               TEXT,
     description_contains      TEXT,
     account_contains          TEXT,

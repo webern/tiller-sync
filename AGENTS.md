@@ -53,11 +53,11 @@ What's Already Built for `tiller sync up`
 Next we need to develop the CLI/MCP interface for interacting with locally stored Transactions,
 Categories, and AutoCats. Let's work on these one item at a time. NEVER do multiple items at a time.
 
-- [ ] Schema changes (Change migration 1: DO NOT add new migrations)
-    - [ ] Change categories table such that the category name field is the primary key
-    - [ ] Create a foreign key constraint between transactions and categories.
-    - [ ] Create a foreign key constraint between autocats and categories.
-    - [ ] Update documentation to note these foreign key constraints
+- [x] Schema changes (Change migration 1: DO NOT add new migrations)
+    - [x] Change categories table such that the category name field is the primary key
+    - [x] Create a foreign key constraint between transactions and categories.
+    - [x] Create a foreign key constraint between autocats and categories.
+    - [x] Update documentation to note these foreign key constraints
 
 - [ ] Update Transactions
     - [ ] Design and implement a CLI interface and command for updating a single transaction by ID
