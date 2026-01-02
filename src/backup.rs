@@ -1,11 +1,12 @@
 //! Backup management for local file backups during sync operations.
 
+use crate::error::Res;
 use crate::model::TillerData;
-use crate::{utils, Config, Result};
+use crate::{utils, Config};
 use anyhow::Context;
 use chrono::Local;
-use log::debug;
 use std::path::PathBuf;
+use tracing::debug;
 
 /// Prefix for sync-down backup files.
 pub const SYNC_DOWN: &str = "sync-down";
@@ -21,7 +22,7 @@ pub const SQLITE: &str = "tiller.sqlite";
 /// The `Backup` struct is immutable and owns copies of the paths and settings it needs.
 /// Create a new instance via `Config::backup()` or `Backup::new()`.
 #[derive(Debug, Clone)]
-pub struct Backup {
+pub(crate) struct Backup {
     backups_dir: PathBuf,
     backup_copies: u32,
     sqlite_path: PathBuf,
@@ -29,7 +30,7 @@ pub struct Backup {
 
 impl Backup {
     /// Creates a new `Backup` instance from a `Config`.
-    pub fn new(config: &Config) -> Self {
+    pub(crate) fn new(config: &Config) -> Self {
         Self {
             backups_dir: config.backups().to_path_buf(),
             backup_copies: config.backup_copies(),
@@ -43,7 +44,7 @@ impl Backup {
     /// Automatically rotates old backups, keeping only `backup_copies` files.
     ///
     /// Returns the path to the created backup file.
-    pub async fn save_json(&self, prefix: &str, data: &TillerData) -> Result<PathBuf> {
+    pub(crate) async fn save_json(&self, prefix: &str, data: &TillerData) -> Res<PathBuf> {
         let date = today();
         let seq = self.next_sequence_number(prefix, &date, "json").await?;
         let filename = format!("{prefix}.{date}-{seq:03}.json");
@@ -64,7 +65,7 @@ impl Backup {
     /// Automatically rotates old backups, keeping only `backup_copies` files.
     ///
     /// Returns the path to the created backup file.
-    pub async fn copy_sqlite(&self) -> Result<PathBuf> {
+    pub(crate) async fn copy_sqlite(&self) -> Res<PathBuf> {
         let date = today();
         let seq = self.next_sequence_number(SQLITE, &date, "").await?;
         let filename = format!("{SQLITE}.{date}-{seq:03}");
@@ -80,7 +81,7 @@ impl Backup {
     /// Loads the most recent JSON backup file with the given prefix.
     ///
     /// Returns `None` if no backup files exist.
-    pub async fn load_latest_json(&self, prefix: &str) -> Result<Option<TillerData>> {
+    pub(crate) async fn load_latest_json(&self, prefix: &str) -> Res<Option<TillerData>> {
         let latest = self.find_latest_backup(prefix, "json").await?;
 
         match latest {
@@ -99,7 +100,7 @@ impl Backup {
     }
 
     /// Finds the most recent backup file with the given prefix and extension.
-    async fn find_latest_backup(&self, prefix: &str, extension: &str) -> Result<Option<PathBuf>> {
+    async fn find_latest_backup(&self, prefix: &str, extension: &str) -> Res<Option<PathBuf>> {
         let mut files: Vec<(PathBuf, String)> = Vec::new();
 
         let mut dir = utils::read_dir(&self.backups_dir).await?;
@@ -124,7 +125,7 @@ impl Backup {
 
     /// Scans the backups directory for existing files with the given prefix and date,
     /// and returns the next sequence number.
-    async fn next_sequence_number(&self, prefix: &str, date: &str, extension: &str) -> Result<u32> {
+    async fn next_sequence_number(&self, prefix: &str, date: &str, extension: &str) -> Res<u32> {
         let pattern_start = format!("{prefix}.{date}-");
         let mut max_seq: u32 = 0;
 
@@ -148,7 +149,7 @@ impl Backup {
     }
 
     /// Rotates old backup files, keeping only `backup_copies` files with the given prefix.
-    async fn rotate(&self, prefix: &str, extension: &str) -> Result<()> {
+    async fn rotate(&self, prefix: &str, extension: &str) -> Res<()> {
         // Collect all matching backup files
         let mut files: Vec<(PathBuf, String)> = Vec::new();
 

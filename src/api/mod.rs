@@ -12,11 +12,13 @@ mod tiller;
 use crate::api::sheet::GoogleSheet;
 use crate::api::tiller::TillerImpl;
 use crate::model::TillerData;
-use crate::{Config, Result};
+use crate::Config;
+use crate::Result;
 pub(super) use oauth::TokenProvider;
 pub(super) use sheet_test_client::TestSheet;
 use std::env::VarError;
 
+use crate::error::{ErrorType, IntoResult, Res};
 #[cfg(test)]
 pub(super) use sheet_test_client::{SheetCall, TestSheetState};
 
@@ -77,8 +79,14 @@ pub async fn sheet(config: Config, mode: Mode) -> Result<Box<dyn Sheet>> {
     let sheet_client: Box<dyn Sheet> = match mode {
         Mode::Google => {
             let token_provider =
-                TokenProvider::load(config.client_secret_path(), config.token_path()).await?;
-            Box::new(GoogleSheet::new(config.clone(), token_provider).await?)
+                TokenProvider::load(config.client_secret_path(), config.token_path())
+                    .await
+                    .pub_result(ErrorType::Config)?;
+            Box::new(
+                GoogleSheet::new(config.clone(), token_provider)
+                    .await
+                    .pub_result(ErrorType::Internal)?,
+            )
         }
         Mode::Testing => Box::new(TestSheet::new_with_seed_data(config.spreadsheet_id())),
     };
@@ -88,47 +96,47 @@ pub async fn sheet(config: Config, mode: Mode) -> Result<Box<dyn Sheet>> {
 
 /// Construct a `Tiller` client, which will use `sheet` to communicate with Google sheets (or, in
 /// testing mode, will use in-memory seed data).
-pub async fn tiller(sheet: Box<dyn Sheet>) -> Result<impl Tiller> {
+pub async fn tiller(sheet: Box<dyn Sheet>) -> Res<impl Tiller> {
     TillerImpl::new(sheet).await
 }
 
 #[async_trait::async_trait]
 pub trait Sheet: Send {
     /// Get the data from a Google sheet.
-    async fn get(&mut self, sheet_name: &str) -> Result<Vec<Vec<String>>>;
+    async fn get(&mut self, sheet_name: &str) -> Res<Vec<Vec<String>>>;
 
     /// Get the formulas from a Google sheet (returns formulas for formula cells, values for non-formula cells).
-    async fn get_formulas(&mut self, sheet_name: &str) -> Result<Vec<Vec<String>>>;
+    async fn get_formulas(&mut self, sheet_name: &str) -> Res<Vec<Vec<String>>>;
 
     /// Clear specified ranges in the spreadsheet.
     /// Each range should be in A1 notation, e.g., "Transactions!A2:ZZ".
-    async fn clear_ranges(&mut self, ranges: &[&str]) -> Result<()>;
+    async fn clear_ranges(&mut self, ranges: &[&str]) -> Res<()>;
 
     /// Write data to specified ranges in the spreadsheet.
     /// Uses ValueInputOption::UserEntered so Sheets can parse dates, numbers, and formulas.
-    async fn write_ranges(&mut self, data: &[SheetRange]) -> Result<()>;
+    async fn write_ranges(&mut self, data: &[SheetRange]) -> Res<()>;
 
     /// Create a copy of the spreadsheet using the Google Drive API.
     /// Returns the file ID of the new copy.
-    async fn copy_spreadsheet(&mut self, new_name: &str) -> Result<String>;
+    async fn copy_spreadsheet(&mut self, new_name: &str) -> Res<String>;
 }
 
 #[async_trait::async_trait]
 pub trait Tiller {
     /// Get the data from the Tiller Google sheet.
-    async fn get_data(&mut self) -> Result<TillerData>;
+    async fn get_data(&mut self) -> Res<TillerData>;
 
     /// Create a backup copy of the spreadsheet.
     /// Returns the file ID of the new copy.
-    async fn copy_spreadsheet(&mut self, new_name: &str) -> Result<String>;
+    async fn copy_spreadsheet(&mut self, new_name: &str) -> Res<String>;
 
     /// Clear and write data to the Google sheet.
     /// This clears all data rows (preserving headers) and writes new data.
-    async fn clear_and_write_data(&mut self, data: &TillerData) -> Result<()>;
+    async fn clear_and_write_data(&mut self, data: &TillerData) -> Res<()>;
 
     /// Verify that the write was successful by re-fetching row counts.
     /// Returns the counts (transactions, categories, autocat) if verification passes.
-    async fn verify_write(&mut self, expected: &TillerData) -> Result<(usize, usize, usize)>;
+    async fn verify_write(&mut self, expected: &TillerData) -> Res<(usize, usize, usize)>;
 }
 
 #[tokio::test]

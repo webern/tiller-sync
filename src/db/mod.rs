@@ -4,8 +4,8 @@
 mod migrations;
 
 use crate::api::{AUTO_CAT, CATEGORIES, TRANSACTIONS};
+use crate::error::Res;
 use crate::model::{Amount, AutoCat, Category, Mapping, TillerData, Transaction};
-use crate::Result;
 use anyhow::{bail, Context};
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
@@ -47,7 +47,7 @@ impl Db {
     /// - Creates a SQLite client
     /// - Updates the database schema with migrations if it is out-of-date
     /// - Returns a constructed `Datastore` object for further operations
-    pub(crate) async fn load(path: impl AsRef<Path>) -> Result<Self> {
+    pub(crate) async fn load(path: impl AsRef<Path>) -> Res<Self> {
         let path = path.as_ref();
         if !path.exists() {
             bail!("SQLite database not found at {}", path.display());
@@ -73,7 +73,7 @@ impl Db {
     /// - Creates a new SQLite file at `path`
     /// - Initializes the database schema
     /// - Returns a constructed `Datastore` object for further operations
-    pub(crate) async fn init(path: impl AsRef<Path>) -> Result<Self> {
+    pub(crate) async fn init(path: impl AsRef<Path>) -> Res<Self> {
         let path = path.as_ref();
         if path.exists() {
             bail!("SQLite database already exists at {}", path.display());
@@ -97,7 +97,7 @@ impl Db {
     }
 
     /// Returns the number of rows in the transactions table.
-    pub(crate) async fn count_transactions(&self) -> Result<u64> {
+    pub(crate) async fn count_transactions(&self) -> Res<u64> {
         let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM transactions")
             .fetch_one(&self.pool)
             .await?;
@@ -108,7 +108,7 @@ impl Db {
     /// - Transactions: upsert (insert new, update existing, delete removed)
     /// - Categories: delete all, then insert all
     /// - AutoCat: delete all, then insert all
-    pub(crate) async fn save_tiller_data(&self, data: &TillerData) -> Result<()> {
+    pub(crate) async fn save_tiller_data(&self, data: &TillerData) -> Res<()> {
         use sqlx::Row;
 
         // Get existing transaction IDs for upsert logic
@@ -174,7 +174,7 @@ impl Db {
 
     /// Saves formulas from TillerData to the formulas table.
     /// Clears existing formulas and inserts all formulas from the three sheets.
-    async fn save_formulas(&self, data: &TillerData) -> Result<()> {
+    async fn save_formulas(&self, data: &TillerData) -> Res<()> {
         // Clear all existing formulas
         sqlx::query("DELETE FROM formulas")
             .execute(&self.pool)
@@ -221,14 +221,14 @@ impl Db {
 
     /// Saves sheet metadata (header mapping) for all three sheets.
     /// Clears existing metadata and inserts all mappings.
-    async fn save_sheet_metadata(&self, data: &TillerData) -> Result<()> {
+    async fn save_sheet_metadata(&self, data: &TillerData) -> Res<()> {
         // Clear all existing metadata
         sqlx::query("DELETE FROM sheet_metadata")
             .execute(&self.pool)
             .await?;
 
         // Helper to save mapping for a sheet
-        async fn save_mapping(pool: &SqlitePool, sheet: &str, mapping: &Mapping) -> Result<()> {
+        async fn save_mapping(pool: &SqlitePool, sheet: &str, mapping: &Mapping) -> Res<()> {
             for (order, (header, column)) in mapping
                 .headers()
                 .iter()
@@ -262,7 +262,7 @@ impl Db {
 
     /// Loads sheet metadata (header mapping) for a specific sheet.
     /// Returns None if no metadata exists for the sheet.
-    async fn load_sheet_metadata(&self, sheet: &str) -> Result<Option<Mapping>> {
+    async fn load_sheet_metadata(&self, sheet: &str) -> Res<Option<Mapping>> {
         let rows: Vec<(String,)> = sqlx::query_as(
             r#"SELECT header_name FROM sheet_metadata
                WHERE sheet = ?
@@ -283,7 +283,7 @@ impl Db {
     }
 
     /// Retrieves all data from the database as TillerData.
-    pub(crate) async fn get_tiller_data(&self) -> Result<TillerData> {
+    pub(crate) async fn get_tiller_data(&self) -> Res<TillerData> {
         use crate::model::{AutoCats, Categories, Transactions};
         use sqlx::Row;
 
@@ -489,7 +489,7 @@ impl Db {
     }
 
     /// Inserts a new transaction into the database.
-    pub(crate) async fn _insert_transaction(&self, transaction: &Transaction) -> Result<()> {
+    pub(crate) async fn _insert_transaction(&self, transaction: &Transaction) -> Res<()> {
         let other_fields_json = if transaction.other_fields.is_empty() {
             None
         } else {
@@ -535,7 +535,7 @@ impl Db {
     }
 
     /// Updates an existing transaction in the database.
-    pub(crate) async fn _update_transaction(&self, transaction: &Transaction) -> Result<()> {
+    pub(crate) async fn _update_transaction(&self, transaction: &Transaction) -> Res<()> {
         let other_fields_json = if transaction.other_fields.is_empty() {
             None
         } else {
@@ -582,7 +582,7 @@ impl Db {
     }
 
     /// Retrieves a transaction by its ID.
-    pub(crate) async fn _get_transaction(&self, id: &str) -> Result<Option<Transaction>> {
+    pub(crate) async fn _get_transaction(&self, id: &str) -> Res<Option<Transaction>> {
         use sqlx::Row;
 
         let row = sqlx::query(
@@ -654,7 +654,7 @@ impl Db {
     }
 
     /// Inserts a new category into the database. Returns the primary key ID.
-    pub(crate) async fn _insert_category(&self, category: &Category) -> Result<u64> {
+    pub(crate) async fn _insert_category(&self, category: &Category) -> Res<u64> {
         let other_fields_json = if category.other_fields.is_empty() {
             None
         } else {
@@ -679,7 +679,7 @@ impl Db {
     }
 
     /// Updates an existing category in the database. Returns the primary key ID.
-    pub(crate) async fn _update_category(&self, category: &_Row<Category>) -> Result<u64> {
+    pub(crate) async fn _update_category(&self, category: &_Row<Category>) -> Res<u64> {
         let other_fields_json = if category.row.other_fields.is_empty() {
             None
         } else {
@@ -705,7 +705,7 @@ impl Db {
     }
 
     /// Retrieves a category by its ID.
-    pub(crate) async fn _get_category(&self, id: &str) -> Result<Option<_Row<Category>>> {
+    pub(crate) async fn _get_category(&self, id: &str) -> Res<Option<_Row<Category>>> {
         use sqlx::Row;
 
         let id_num: i64 = id.parse().context("Invalid category ID")?;
@@ -748,7 +748,7 @@ impl Db {
     }
 
     /// Inserts a new autocat rule into the database. Returns the primary key ID.
-    pub(crate) async fn _insert_autocat(&self, autocat: &AutoCat) -> Result<u64> {
+    pub(crate) async fn _insert_autocat(&self, autocat: &AutoCat) -> Res<u64> {
         let other_fields_json = if autocat.other_fields.is_empty() {
             None
         } else {
@@ -800,7 +800,7 @@ impl Db {
     }
 
     /// Updates an existing autocat rule in the database. Returns the primary key ID.
-    pub(crate) async fn _update_autocat(&self, autocat: &_Row<AutoCat>) -> Result<u64> {
+    pub(crate) async fn _update_autocat(&self, autocat: &_Row<AutoCat>) -> Res<u64> {
         let other_fields_json = if autocat.row.other_fields.is_empty() {
             None
         } else {
@@ -855,7 +855,7 @@ impl Db {
     }
 
     /// Retrieves an autocat rule by its ID.
-    pub(crate) async fn _get_autocat(&self, id: &str) -> Result<Option<_Row<AutoCat>>> {
+    pub(crate) async fn _get_autocat(&self, id: &str) -> Res<Option<_Row<AutoCat>>> {
         use sqlx::Row;
 
         let id_num: i64 = id.parse().context("Invalid autocat ID")?;
@@ -931,7 +931,7 @@ impl Db {
 
     /// Creates the schema_version table and inserts version 0. This establishes the invariant
     /// that schema_version always exists, allowing migration logic to work uniformly.
-    async fn bootstrap(&self) -> Result<()> {
+    async fn bootstrap(&self) -> Res<()> {
         sqlx::query(
             "CREATE TABLE schema_version (
                 version INTEGER NOT NULL
@@ -950,7 +950,7 @@ impl Db {
     }
 
     /// Returns the current schema version from the database.
-    async fn schema_version(&self) -> Result<i32> {
+    async fn schema_version(&self) -> Res<i32> {
         let row: (i32,) = sqlx::query_as("SELECT MAX(version) FROM schema_version")
             .fetch_one(&self.pool)
             .await
@@ -959,13 +959,13 @@ impl Db {
     }
 
     /// Runs migrations to bring the database to CURRENT_VERSION.
-    async fn migrate(&self) -> Result<()> {
+    async fn migrate(&self) -> Res<()> {
         let current = self.schema_version().await?;
         migrations::run(&self.pool, current, CURRENT_VERSION).await
     }
 
     /// Deletes a transaction by its ID. Used for testing gap detection.
-    pub(crate) async fn _delete_transaction(&self, transaction_id: &str) -> Result<()> {
+    pub(crate) async fn _delete_transaction(&self, transaction_id: &str) -> Res<()> {
         sqlx::query("DELETE FROM transactions WHERE transaction_id = ?")
             .bind(transaction_id)
             .execute(&self.pool)

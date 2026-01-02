@@ -1,10 +1,10 @@
 use clap::Parser;
-use env_logger::Builder;
-use log::{debug, error, trace, LevelFilter};
 use std::process::ExitCode;
 use tiller_sync::args::{Args, Command, UpDown};
-use tiller_sync::{commands, Mode};
-use tiller_sync::{Config, Result};
+use tiller_sync::{commands, Config, Mode, Result};
+use tracing::{debug, error, info, trace};
+use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -16,7 +16,7 @@ async fn main() -> ExitCode {
     match main_inner(args).await {
         Ok(_) => ExitCode::SUCCESS,
         Err(e) => {
-            error!("Exiting with error: {e:?}");
+            error!("Exiting with error: {e}");
             ExitCode::FAILURE
         }
     }
@@ -44,35 +44,50 @@ pub async fn main_inner(args: Args) -> Result<()> {
                 commands::auth(&config).await
             }
         }
-        Command::Sync(sync_args) => match sync_args.direction() {
-            UpDown::Up => {
-                let formulas_mode = commands::FormulasMode::Unknown;
-                commands::sync_up(
-                    Config::load(home).await?,
-                    mode,
-                    sync_args.force(),
-                    formulas_mode,
-                )
-                .await
-            }
-            UpDown::Down => commands::sync_down(Config::load(home).await?, mode).await,
-        },
+        Command::Sync(sync_args) => {
+            let message = match sync_args.direction() {
+                UpDown::Up => {
+                    commands::sync_up(
+                        Config::load(home).await?,
+                        mode,
+                        sync_args.force(),
+                        sync_args.formulas(),
+                    )
+                    .await?
+                }
+                UpDown::Down => commands::sync_down(Config::load(home).await?, mode).await?,
+            };
+            info!("{message}");
+            Ok(())
+        }
+        Command::Mcp(_mcp_args) => {
+            let config = Config::load(home).await?;
+            commands::mcp(config, mode).await
+        }
     }
 }
 
-/// Initializes the env_logger.
+/// Initializes the tracing subscriber.
 pub fn init_logger(level: LevelFilter) {
-    match std::env::var(env_logger::DEFAULT_FILTER_ENV).ok() {
+    let filter = match std::env::var("RUST_LOG").ok() {
         Some(_) => {
-            // RUST_LOG exists; env_logger will use it.
-            Builder::from_default_env().init();
+            // RUST_LOG exists; use it.
+            EnvFilter::from_default_env()
         }
         None => {
             // RUST_LOG does not exist; use default log level for this crate only.
-            Builder::new()
-                .filter(Some(env!("CARGO_CRATE_NAME")), level)
-                .filter(Some(env!("CARGO_BIN_NAME")), level)
-                .init();
+            EnvFilter::new(format!(
+                "{}={},{}={}",
+                env!("CARGO_CRATE_NAME"),
+                level,
+                env!("CARGO_BIN_NAME"),
+                level
+            ))
         }
-    }
+    };
+
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .init();
 }

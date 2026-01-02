@@ -1,6 +1,6 @@
+use crate::error::Res;
 use crate::model::items::{Item, Items};
 use crate::model::Amount;
-use crate::Result;
 use anyhow::bail;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -43,7 +43,7 @@ pub struct Transaction {
 }
 
 impl Item for Transaction {
-    fn set_with_header<S1, S2>(&mut self, header: S1, value: S2) -> Result<()>
+    fn set_with_header<S1, S2>(&mut self, header: S1, value: S2) -> Res<()>
     where
         S1: AsRef<str>,
         S2: Into<String>,
@@ -158,7 +158,7 @@ serde_plain::derive_display_from_serialize!(TransactionColumn);
 serde_plain::derive_fromstr_from_deserialize!(TransactionColumn);
 
 impl TransactionColumn {
-    pub fn from_header(header: impl AsRef<str>) -> Result<TransactionColumn> {
+    pub fn from_header(header: impl AsRef<str>) -> Res<TransactionColumn> {
         let header_str = header.as_ref();
         match header_str {
             TRANSACTION_ID_STR => Ok(TransactionColumn::TransactionId),

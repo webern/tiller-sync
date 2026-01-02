@@ -9,7 +9,7 @@
 //! app, top-to-bottom, without using Google Sheets.
 
 use crate::api::{Sheet, SheetRange, AUTO_CAT, CATEGORIES, TRANSACTIONS};
-use crate::Result;
+use crate::error::Res;
 use anyhow::Context;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -206,7 +206,7 @@ impl TestSheet {
 
 #[async_trait::async_trait]
 impl Sheet for TestSheet {
-    async fn get(&mut self, sheet_name: &str) -> Result<SheetData> {
+    async fn get(&mut self, sheet_name: &str) -> Res<SheetData> {
         let mut map = TEST_SHEETS
             .get_or_init(|| Mutex::new(HashMap::new()))
             .lock()
@@ -231,7 +231,7 @@ impl Sheet for TestSheet {
         Ok(data)
     }
 
-    async fn get_formulas(&mut self, sheet_name: &str) -> Result<SheetData> {
+    async fn get_formulas(&mut self, sheet_name: &str) -> Res<SheetData> {
         let mut map = TEST_SHEETS
             .get_or_init(|| Mutex::new(HashMap::new()))
             .lock()
@@ -264,7 +264,7 @@ impl Sheet for TestSheet {
         Ok(data)
     }
 
-    async fn clear_ranges(&mut self, ranges: &[&str]) -> Result<()> {
+    async fn clear_ranges(&mut self, ranges: &[&str]) -> Res<()> {
         let mut map = TEST_SHEETS
             .get_or_init(|| Mutex::new(HashMap::new()))
             .lock()
@@ -302,7 +302,7 @@ impl Sheet for TestSheet {
         Ok(())
     }
 
-    async fn write_ranges(&mut self, data: &[SheetRange]) -> Result<()> {
+    async fn write_ranges(&mut self, data: &[SheetRange]) -> Res<()> {
         let mut map = TEST_SHEETS
             .get_or_init(|| Mutex::new(HashMap::new()))
             .lock()
@@ -355,7 +355,7 @@ impl Sheet for TestSheet {
         Ok(())
     }
 
-    async fn copy_spreadsheet(&mut self, new_name: &str) -> Result<String> {
+    async fn copy_spreadsheet(&mut self, new_name: &str) -> Res<String> {
         let map = TEST_SHEETS
             .get_or_init(|| Mutex::new(HashMap::new()))
             .lock()
@@ -431,7 +431,7 @@ fn generate_transaction_formulas(transactions: &[Vec<String>]) -> SheetData {
 }
 
 /// Loads data from a CSV-formatted string.
-fn load_csv(csv_data: &str) -> Result<SheetData> {
+fn load_csv(csv_data: &str) -> Res<SheetData> {
     let bytes = csv_data.as_bytes(); // Get a byte slice from the String
     let mut rdr = csv::ReaderBuilder::new()
         .has_headers(false) // Ensure headers are treated as part of the data

@@ -6,8 +6,10 @@ A program for syncing data between a [tiller] Google Sheet and a local SQLite da
 With it you can download your transactions, make edits to them locally in SQLite, then sync back the
 changes (this part is hard, TBD!)
 
-Current Status: `tiller sync down` and `tiller sync up` are working. Not done, additional commands
-and MCP server.
+Current Status: `tiller sync down` and `tiller sync up` are working and the MCP server is working.
+This means you can store your transactions locally and can upload them back up to your sheet, either
+with the command line or with an AI agent via MCP, but you cannot manipulate them (unless you use
+SQLite).
 
 ## Table of Contents
 

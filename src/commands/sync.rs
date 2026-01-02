@@ -1,69 +1,99 @@
 use super::FormulasMode;
 use crate::api::{sheet, tiller, Mode, Tiller};
 use crate::backup::{SYNC_DOWN, SYNC_UP_PRE};
+use crate::error::{ErrorType, IntoResult};
 use crate::{Config, Result};
-use anyhow::bail;
-use log::{debug, info, warn};
+use anyhow::anyhow;
+use tracing::{debug, info, warn};
 
-pub async fn sync_down(config: Config, mode: Mode) -> Result<()> {
+/// Gets data from the tiller Google sheet and persists it to the local datastore. Returns an info
+/// message that can be printed for the user.
+pub async fn sync_down(config: Config, mode: Mode) -> Result<String> {
     // Backup SQLite database before modifying
-    let sqlite_backup = config.backup().copy_sqlite().await?;
+    let sqlite_backup = config
+        .backup()
+        .copy_sqlite()
+        .await
+        .pub_result(ErrorType::Internal)?;
     debug!("Saved SQLite backup to {}", sqlite_backup.display());
 
     // Download data from Google Sheets (or test data in test mode)
     let sheet_client = sheet(config.clone(), mode).await?;
-    let mut tiller_client = tiller(sheet_client).await?;
-    let tiller_data = tiller_client.get_data().await?;
+    let mut tiller_client = tiller(sheet_client).await.pub_result(ErrorType::Internal)?;
+    let tiller_data = tiller_client.get_data().await.pub_result(ErrorType::Sync)?;
 
     // Save JSON backup of downloaded data
-    let json_backup = config.backup().save_json(SYNC_DOWN, &tiller_data).await?;
+    let json_backup = config
+        .backup()
+        .save_json(SYNC_DOWN, &tiller_data)
+        .await
+        .pub_result(ErrorType::Internal)?;
     debug!("Saved JSON backup to {}", json_backup.display());
 
     // Save to SQLite database
-    config.db().save_tiller_data(&tiller_data).await?;
+    config
+        .db()
+        .save_tiller_data(&tiller_data)
+        .await
+        .pub_result(ErrorType::Database)?;
 
-    info!(
-        "Synced {} transactions, {} categories, {} autocat rules from sheet to database",
+    Ok(format!(
+        "Synced {} transactions, {} categories, {} autocat rules from sheet to local datastore",
         tiller_data.transactions.data().len(),
         tiller_data.categories.data().len(),
         tiller_data.auto_cats.data().len()
-    );
-
-    Ok(())
+    ))
 }
 
+/// Sends data from the local datastore to the Google sheet, returns a message that can be printed
+/// for the user.
 pub async fn sync_up(
     config: Config,
     mode: Mode,
     force: bool,
     formulas_mode: FormulasMode,
-) -> Result<()> {
+) -> Result<String> {
     // Precondition: verify database has transactions
-    if config.db().count_transactions().await? == 0 {
-        bail!("Database has no transactions. Run 'tiller sync down' first to get data");
+    if config
+        .db()
+        .count_transactions()
+        .await
+        .pub_result(ErrorType::Database)?
+        == 0
+    {
+        return Err(anyhow!(
+            "Database has no transactions. Run 'tiller sync down' first to get data"
+        ))
+        .pub_result(ErrorType::Sync);
     }
 
     // Download current sheet state (or test data in test mode)
     let sheet_client = sheet(config.clone(), mode).await?;
-    let mut tiller_client = tiller(sheet_client).await?;
-    let current_sheet = tiller_client.get_data().await?;
+    let mut tiller_client = tiller(sheet_client).await.pub_result(ErrorType::Internal)?;
+    let current_sheet = tiller_client.get_data().await.pub_result(ErrorType::Sync)?;
 
     // Save sync-up-pre backup (before any modifications)
     let pre_backup = config
         .backup()
         .save_json(SYNC_UP_PRE, &current_sheet)
-        .await?;
+        .await
+        .pub_result(ErrorType::Internal)?;
     debug!("Saved pre-upload backup to {}", pre_backup.display());
 
     // Conflict detection: compare current sheet with last sync-down backup
-    let last_sync_down = config.backup().load_latest_json(SYNC_DOWN).await?;
+    let last_sync_down = config
+        .backup()
+        .load_latest_json(SYNC_DOWN)
+        .await
+        .pub_result(ErrorType::Internal)?;
     match last_sync_down {
         None => {
             if !force {
-                bail!(
+                return Err(anyhow!(
                     "No sync-down backup found. Run 'tiller sync down' first, \
                      or use --force to proceed without conflict detection"
-                );
+                ))
+                .pub_result(ErrorType::Sync);
             }
             warn!("No sync-down backup found, skipping conflict detection (--force)");
         }
@@ -71,11 +101,12 @@ pub async fn sync_up(
             // Compare current sheet with backup
             if current_sheet != backup_data {
                 if !force {
-                    bail!(
+                    return Err(anyhow!(
                         "Sheet has been modified since last sync down. \
                          Run 'tiller sync down' first to merge changes, \
                          or use --force to overwrite"
-                    );
+                    ))
+                    .pub_result(ErrorType::Sync);
                 }
                 warn!("Sheet differs from last sync-down, proceeding anyway (--force)");
             }
@@ -83,37 +114,47 @@ pub async fn sync_up(
     }
 
     // Build output data from SQLite
-    let db_data = config.db().get_tiller_data().await?;
+    let db_data = config
+        .db()
+        .get_tiller_data()
+        .await
+        .pub_result(ErrorType::Database)?;
 
     // Formula safety checks
     match formulas_mode {
         FormulasMode::Unknown => {
             if db_data.has_formulas() {
-                bail!(
+                return Err(anyhow!(
                     "Formulas detected in database. Use `--formulas preserve` to write formulas \
                      back to their original positions, or `--formulas ignore` to skip formulas"
-                );
+                ))
+                .pub_result(ErrorType::Sync);
             }
         }
         FormulasMode::Preserve => {
             // Check for gaps in original_order (indicating deleted rows) across all sheets
             if db_data.has_original_order_gaps() {
                 if !force {
-                    bail!(
+                    return Err(anyhow!(
                         "Row deletions detected (gaps in original_order). Formula positions may \
                          be corrupted. Use --force to proceed anyway, or use --formulas ignore"
-                    );
+                    ))
+                    .pub_result(ErrorType::Sync);
                 }
                 warn!("Gaps detected in original_order, proceeding anyway (--force)");
             }
         }
         FormulasMode::Ignore => {
-            // No formula handling needed
+            debug!("Not considering formulas due to '--formulas ignore'");
         }
     }
 
     // Backup SQLite database before uploading
-    let sqlite_backup = config.backup().copy_sqlite().await?;
+    let sqlite_backup = config
+        .backup()
+        .copy_sqlite()
+        .await
+        .pub_result(ErrorType::Internal)?;
     debug!("Saved SQLite backup to {}", sqlite_backup.display());
 
     // Backup Google Sheet via Drive API
@@ -121,23 +162,36 @@ pub async fn sync_up(
         "tiller-backup-{}",
         chrono::Local::now().format("%Y-%m-%d-%H%M%S")
     );
-    let backup_id = tiller_client.copy_spreadsheet(&backup_name).await?;
+    let backup_id = tiller_client
+        .copy_spreadsheet(&backup_name)
+        .await
+        .pub_result(ErrorType::Sync)?;
     debug!(
         "Created Google Sheet backup '{}' (ID: {})",
         backup_name, backup_id
     );
 
     // Execute batch clear and write to Google Sheet
-    tiller_client.clear_and_write_data(&db_data).await?;
+    tiller_client
+        .clear_and_write_data(&db_data)
+        .await
+        .pub_result(ErrorType::Sync)?;
 
     // Verification - re-fetch row counts and compare
-    let (txn_count, cat_count, ac_count) = tiller_client.verify_write(&db_data).await?;
+    let (txn_count, cat_count, ac_count) = tiller_client
+        .verify_write(&db_data)
+        .await
+        .pub_result(ErrorType::Sync)?;
 
     info!(
         "Synced {} transactions, {} categories, {} autocat rules to sheet",
         txn_count, cat_count, ac_count
     );
-    Ok(())
+
+    Ok(format!(
+        "Synced {txn_count} transactions, {cat_count} categories, {ac_count} autocat rules \
+        from local datastore to sheet",
+    ))
 }
 
 #[cfg(test)]

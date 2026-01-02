@@ -2,6 +2,7 @@
 //! - `client_secret.json`: OAuth 2.0 client credentials from Google Cloud Console
 
 use crate::api::OAUTH_SCOPES;
+use crate::error::{ErrorType, IntoResult, Res};
 use crate::{utils, Result};
 use anyhow::{bail, Context};
 use chrono::{DateTime, Utc};
@@ -10,6 +11,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
+use tracing::warn;
 
 /// This redirect needs to be present in the OAuth credential file, or else OAuth will not work.
 const REDIRECT: &str = "http://localhost";
@@ -33,7 +35,9 @@ where
     /// Load data from a file and create a File instance
     pub(super) async fn load(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
-        let data: F = utils::deserialize(&path).await?;
+        let data: F = utils::deserialize(&path)
+            .await
+            .pub_result(ErrorType::Config)?;
         Ok(Self { path, data })
     }
 
@@ -47,17 +51,21 @@ where
 
     /// Save the current data to the file
     pub(super) async fn save(&self) -> Result<()> {
-        let json =
-            serde_json::to_string_pretty(&self.data).context("Failed to serialize data to JSON")?;
-        utils::write(&self.path, json).await?;
+        let json = serde_json::to_string_pretty(&self.data)
+            .context("Failed to serialize data to JSON")
+            .pub_result(ErrorType::Config)?;
+        utils::write(&self.path, json)
+            .await
+            .pub_result(ErrorType::Config)?;
 
         // Set restrictive permissions on Unix-like systems
         #[cfg(unix)]
         {
             use std::fs::Permissions;
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&self.path, Permissions::from_mode(0o600))
-                .context("Failed to set file permissions")?;
+            if let Err(e) = std::fs::set_permissions(&self.path, Permissions::from_mode(0o600)) {
+                warn!("Failed to set safer permissions on the secrets file: {e}");
+            }
         }
 
         Ok(())
@@ -114,6 +122,7 @@ impl SecretFile {
         utils::deserialize(path)
             .await
             .context("Unable to read ClientSecretFile")
+            .pub_result(ErrorType::Internal)
     }
 
     /// Get the redirect URI
@@ -218,7 +227,7 @@ pub(super) struct TokenFile {
 }
 
 impl TokenFile {
-    pub(super) async fn load(p: impl AsRef<Path>) -> Result<Self> {
+    pub(super) async fn load(p: impl AsRef<Path>) -> Res<Self> {
         let token_file: Self = utils::deserialize(p.as_ref())
             .await
             .context("Unable to deserialize the token JSON file")?;
@@ -226,7 +235,7 @@ impl TokenFile {
         Ok(token_file)
     }
 
-    fn validate_scopes(&self) -> Result<()> {
+    fn validate_scopes(&self) -> Res<()> {
         let found_scopes: HashSet<&str> = self.scopes.iter().map(|s| s.as_str()).collect();
         for &required_scope in OAUTH_SCOPES {
             if !found_scopes.contains(required_scope) {

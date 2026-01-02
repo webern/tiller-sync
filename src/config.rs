@@ -6,8 +6,9 @@
 
 use crate::backup::Backup;
 use crate::db::Db;
+use crate::error::{ErrorType, IntoResult, Res};
 use crate::{utils, Result};
-use anyhow::{bail, Context};
+use anyhow::{anyhow, Context};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -52,36 +53,41 @@ impl Config {
     ///
     /// # Errors
     /// - Returns an error if any file operations fail.
-    pub async fn create(
-        dir: impl Into<PathBuf>,
-        secret_file: &Path,
-        sheet_url: &str,
-    ) -> Result<Self> {
+    pub async fn create(dir: impl Into<PathBuf>, secret_file: &Path, url: &str) -> Result<Self> {
         // Create the directory if it does not exist
         let maybe_relative = dir.into();
         utils::make_dir(&maybe_relative)
             .await
-            .context("Unable to create the tiller home directory")?;
+            .context("Unable to create the tiller home directory")
+            .pub_result(ErrorType::Config)?;
 
         // Canonicalize the directory path
-        let root = utils::canonicalize(&maybe_relative).await?;
+        let root = utils::canonicalize(&maybe_relative)
+            .await
+            .pub_result(ErrorType::Internal)?;
 
         // Create the subdirectories
         let backups_dir = root.join(".backups");
-        utils::make_dir(&backups_dir).await?;
+        utils::make_dir(&backups_dir)
+            .await
+            .pub_result(ErrorType::Internal)?;
         let secrets_dir = root.join(".secrets");
-        utils::make_dir(&secrets_dir).await?;
+        utils::make_dir(&secrets_dir)
+            .await
+            .pub_result(ErrorType::Internal)?;
 
         // Move the Google OAuth client credentials file to its default location in the data dir
         let secret_destination = secrets_dir.join(CLIENT_SECRET_JSON);
-        utils::rename(secret_file, secret_destination).await?;
+        utils::rename(secret_file, secret_destination)
+            .await
+            .pub_result(ErrorType::Internal)?;
         let config_path = root.join(CONFIG_JSON);
 
         // Create and save an initial ConfigFile in the datastore
         let config_file = ConfigFile {
             app_name: APP_NAME.to_string(),
             config_version: CONFIG_VERSION,
-            sheet_url: sheet_url.to_string(),
+            sheet_url: url.to_string(),
             backup_copies: BACKUP_COPIES,
             client_secret_path: None,
             token_path: None,
@@ -92,11 +98,13 @@ impl Config {
         let db_path = root.join(TILLER_SQLITE);
         let db = Db::init(&db_path)
             .await
-            .context("Unable to create SQLite DB")?;
+            .context("Unable to create SQLite DB")
+            .pub_result(ErrorType::Database)?;
 
         // Extract the spreadsheet ID from the URL
-        let spreadsheet_id = extract_spreadsheet_id(sheet_url)
-            .context("Failed to extract spreadsheet ID from sheet URL")?
+        let spreadsheet_id = extract_spreadsheet_id(url)
+            .context("Failed to extract spreadsheet ID from sheet URL")
+            .pub_result(ErrorType::Config)?
             .to_string();
 
         // Return a new `Config` object that represents a data directory that is ready to use
@@ -119,29 +127,38 @@ impl Config {
     /// - return the loaded configuration object
     pub async fn load(tiller_home: impl Into<PathBuf>) -> Result<Self> {
         let maybe_relative = tiller_home.into();
-        let root = utils::canonicalize(&maybe_relative).await?;
+        let root = utils::canonicalize(&maybe_relative)
+            .await
+            .pub_result(ErrorType::Internal)?;
 
         // Validate that the home directory exists.
         let _ = utils::read_dir(&root)
             .await
-            .context("Tiller Home is missing")?;
+            .context("Tiller Home is missing")
+            .pub_result(ErrorType::Internal)?;
 
         let config_path = root.join("config.json");
         if !config_path.is_file() {
-            bail!("The config file is missing '{}'", config_path.display())
+            return Err(anyhow!(
+                "The config file is missing '{}'",
+                config_path.display()
+            ))
+            .pub_result(ErrorType::Config);
         }
         let config_file = ConfigFile::load(&config_path).await?;
 
         // Extract the spreadsheet ID from the URL
         let spreadsheet_id = extract_spreadsheet_id(&config_file.sheet_url)
-            .context("Failed to extract spreadsheet ID from sheet URL")?
+            .context("Failed to extract spreadsheet ID from sheet URL")
+            .pub_result(ErrorType::Config)?
             .to_string();
 
         // Load the SQLite database
         let db_path = root.join(TILLER_SQLITE);
         let db = Db::load(&db_path)
             .await
-            .context("Unable to load SQLite DB")?;
+            .context("Unable to load SQLite DB")
+            .pub_result(ErrorType::Database)?;
 
         let config = Self {
             root: root.clone(),
@@ -154,16 +171,18 @@ impl Config {
             sqlite_path: db_path,
         };
         if !config.backups.is_dir() {
-            bail!(
+            return Err(anyhow!(
                 "The backups directory is missing '{}'",
                 config.backups.display()
-            )
+            ))
+            .pub_result(ErrorType::Config);
         }
         if !config.secrets.is_dir() {
-            bail!(
+            return Err(anyhow!(
                 "The secrets directory is missing '{}'",
                 config.secrets.display()
-            )
+            ))
+            .pub_result(ErrorType::Config);
         }
         Ok(config)
     }
@@ -204,11 +223,6 @@ impl Config {
         self.config_file.backup_copies
     }
 
-    /// Creates a new `Backup` instance for managing backup files.
-    pub fn backup(&self) -> Backup {
-        Backup::new(self)
-    }
-
     /// Returns the stored `client_secret_path` if it is absolute, otherwise resolves the relative path.
     pub fn client_secret_path(&self) -> PathBuf {
         self.resolve_secrets_file_path(self.config_file.client_secret_path())
@@ -217,6 +231,11 @@ impl Config {
     /// Returns the stored `token_path` if it is absolute, otherwise resolves the relative path.
     pub fn token_path(&self) -> PathBuf {
         self.resolve_secrets_file_path(self.config_file.token_path())
+    }
+
+    /// Creates a new `Backup` instance for managing backup files.
+    pub(crate) fn backup(&self) -> Backup {
+        Backup::new(self)
     }
 
     /// Checks if `p` is relative, and if so, resolves it. Returns it unchanged if it is absolute.
@@ -289,20 +308,21 @@ impl ConfigFile {
     /// Returns an error if the file cannot be read or parsed
     pub async fn load(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
-        let content = tokio::fs::read_to_string(path)
-            .await
-            .with_context(|| format!("Failed to read config file at {}", path.display()))?;
+        let content = utils::read(path).await.pub_result(ErrorType::Internal)?;
 
         let config: ConfigFile = serde_json::from_str(&content)
-            .with_context(|| format!("Failed to parse config file at {}", path.display()))?;
+            .with_context(|| format!("Failed to parse config file at {}", path.display()))
+            .pub_result(ErrorType::Config)?;
 
         // Validate app_name
-        anyhow::ensure!(
-            config.app_name == APP_NAME,
-            "Invalid app_name in config file: expected '{}', got '{}'",
-            APP_NAME,
-            config.app_name
-        );
+        if config.app_name != APP_NAME {
+            return Err(anyhow!(
+                "Invalid app_name in config file: expected '{}', got '{}'",
+                APP_NAME,
+                config.app_name
+            ))
+            .pub_result(ErrorType::Config);
+        }
 
         Ok(config)
     }
@@ -316,10 +336,13 @@ impl ConfigFile {
     /// Returns an error if the file cannot be written
     pub async fn save(&self, path: impl AsRef<Path>) -> Result<()> {
         let p = path.as_ref();
-        let data = serde_json::to_string_pretty(self).context("Unable to serialize config")?;
+        let data = serde_json::to_string_pretty(self)
+            .context("Unable to serialize config")
+            .pub_result(ErrorType::Internal)?;
         utils::write(p, data)
             .await
             .context("Unable to write config file")
+            .pub_result(ErrorType::Internal)
     }
 
     #[cfg(test)]
@@ -368,7 +391,7 @@ impl ConfigFile {
 ///
 /// # Returns
 /// The spreadsheet ID or an error if the URL format is invalid. Returns an empty string if the URL is empty.
-fn extract_spreadsheet_id(url: &str) -> Result<&str> {
+fn extract_spreadsheet_id(url: &str) -> Res<&str> {
     // Handle empty URL case
     if url.is_empty() {
         return Ok(url);

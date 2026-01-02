@@ -2,19 +2,20 @@
 
 The tiller app provides two main modes of operation:
 
-1. CLI based: for syncing data between a local datastore and the user's Tiller Google sheet from the
-   command line
-2. MCP interface: so that it can be used by an AI agent.
+1. **CLI**: Command-line interface for syncing data between a local SQLite datastore and a Tiller
+   Google Sheet.
+2. **MCP**: Model Context Protocol server for AI agent integration. MCP tools wrap CLI commands,
+   exposing the same functionality via JSON-RPC over stdio.
 
 ### Design Principles
 
 - **Separation of Concerns**:
-    - The `api` module code focuses on OAuth and Google API operations
-    - The `commands` module has top-level, end-to-end operations that can be called by either the
-      CLI mode or the MCP mode.
+    - The `api` module handles OAuth and Google API operations.
+    - The `commands` module contains top-level operations callable by both CLI and MCP.
     - The `model` module contains data-model structs such as `Transaction`.
+    - The `mcp` module implements the MCP server, wrapping `commands` functions as tools.
 - **Testability**: Google API operations use traits to enable mocking without requiring actual
-  Google sheets interactions
+  Google sheets interactions.
 
 ## CLI: High Level Overview
 
@@ -102,31 +103,8 @@ tiller sync down
 
 ### MCP
 
-The `tiller mcp` command runs as a long-running process that communicates via JSON-RPC over
-stdin/stdout, implementing the Model Context Protocol. MCP clients (like Claude Code) launch
-`tiller mcp` as a subprocess and send JSON-RPC requests on stdin, receiving responses on stdout.
-The MCP interface shares the same underlying business logic as the CLI commands.
-
-**Running MCP mode:**
-
-```bash
-# MCP client launches this as a subprocess and communicates via stdin/stdout
-tiller mcp
-```
-
-### CLI and MCP Agreement
-
-In general, there will be an agreement between the CLI interface a person can use, and the tools
-that are available in MCP mode.
-
-For example, the following (theoretical) query command could also be made available as an MCP tool:
-
-```bash
-tiller query transactions \
-  --category Groceries \
-  --start-date '2024-10-01' \
-  --end-date '2024-10-31'
-```
+The `tiller mcp` command launches an MCP server. See the dedicated MCP section later in this
+document for details.
 
 ## Tiller Home: Local Directory Structure
 
@@ -196,13 +174,15 @@ this, or to the main SQLite file, depending on context.
 
 ## Logging
 
-Logging will be achieved with `log` and `env_logger`. All logging will be sent to `stderr`. Leaving
-`stdout` for clean output both in MCP and CLI modes. At the `info` logging level, commands such as
-`tiller query` should be extremely quiet, preferably silent. However for `tiller sync` operations,
-`info` logging can be more robust since the call is not about receiving anything on `stdout`.
+Logging uses `tracing` and `tracing-subscriber`. All logging goes to `stderr`, leaving `stdout`
+clean for CLI output and MCP protocol messages.
 
-In other words, commands whose purpose is to send data to `stdout` should be quiet at the `info`
-logging level so that users who use `2>&1` under normal circumstances won't have a problem.
+In MCP mode, important messages are also sent via MCP's `notifications/message` mechanism so the AI
+client receives them. This dual approach (stderr + MCP notifications) allows debugging when running
+`tiller mcp` manually while ensuring AI clients see relevant status information.
+
+At the `info` level, query commands should be quiet. Sync operations can be more verbose since
+their purpose is not to return data on `stdout`.
 
 ## Library Selection
 
@@ -211,6 +191,8 @@ The implementation uses:
 - **`oauth2`** - OAuth 2.0 authentication flow implementation (provides full control over the auth
   process)
 - **OxideComputer's `sheets` library** - Google Sheets API client library
+- **`rmcp`** - Official Rust SDK for Model Context Protocol
+- **`tracing`** - Structured logging and diagnostics
 
 **Explicitly NOT using:**
 
@@ -656,6 +638,57 @@ with the database.
 - **AutoCat**: Delete all, then insert all
 
 All operations run within a single SQLite transaction with rollback on error.
+
+## MCP Server
+
+The `tiller mcp` command runs an MCP (Model Context Protocol) server, enabling AI agents to interact
+with Tiller data programmatically.
+
+### Transport
+
+Uses stdio transport: the MCP client launches `tiller mcp` as a subprocess and communicates via
+JSON-RPC over stdin/stdout.
+
+### Configuration
+
+The `--tiller-home` flag and `TILLER_HOME` environment variable work identically to other commands.
+
+### SDK
+
+Uses the official `rmcp` crate for MCP protocol implementation.
+
+### Tools
+
+MCP tools wrap CLI commands with equivalent parameters:
+
+- **sync_down**: Downloads data from Google Sheet to local SQLite. No parameters.
+- **sync_up**: Uploads data from local SQLite to Google Sheet. Parameters: `force` (bool),
+  `formulas` (enum: unknown, preserve, ignore).
+
+### Tool Responses
+
+For `sync up` and `sync down` tools we return minimal responses: success/failure status and a
+summary message (e.g., "Synced 1,234 transactions, 45 categories, 12 autocat rules"). Full data is
+not included in responses when syncing. Full data *is* included for queries (e.g. select
+statements).
+
+### Error Handling
+
+Tool execution failures use the MCP `isError` pattern: return a successful JSON-RPC response with
+`is_error: true` and a descriptive message. Protocol-level errors use standard JSON-RPC error codes.
+
+The application error type implements conversion to both `rmcp::ErrorData` (for protocol errors) and
+provides a helper for creating `CallToolResult::error()` responses (for tool failures).
+
+### Logging
+
+Dual logging approach:
+
+- **stderr**: All log output via `tracing`, useful for debugging when running `tiller mcp` manually.
+- **MCP notifications**: Important messages sent via `notifications/message` so AI clients see them.
+
+TODO: how can messages logged with, e.g., `debug!`, `info!`, etc. be sent to
+`notifications/message`?
 
 ## Notes and Todos
 

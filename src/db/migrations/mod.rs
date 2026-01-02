@@ -4,11 +4,10 @@
 //! - `migration_NN_up.sql` - Upgrades schema from version `NN-1` to version `NN`
 //! - `migration_NN_down.sql` - Downgrades schema from version `NN` to version `NN-1`
 
+use crate::error::Res;
 use anyhow::{bail, Context};
-use log::debug;
 use sqlx::{Executor, SqlitePool};
-
-use crate::Result;
+use tracing::debug;
 
 /// A database migration with up and down SQL.
 struct Migration {
@@ -34,7 +33,7 @@ const MIGRATIONS: &[Migration] = &[Migration {
 /// - Each migration is executed within a transaction that includes the schema_version update.
 ///
 /// Validates all required migrations exist before running any of them.
-pub(crate) async fn run(pool: &SqlitePool, current_ver: i32, target_ver: i32) -> Result<()> {
+pub(crate) async fn run(pool: &SqlitePool, current_ver: i32, target_ver: i32) -> Res<()> {
     if current_ver == target_ver {
         debug!("Database already at target version {target_ver}, no migrations needed");
         return Ok(());
@@ -72,7 +71,7 @@ pub(crate) async fn run(pool: &SqlitePool, current_ver: i32, target_ver: i32) ->
 }
 
 /// Executes a single migration's SQL and updates schema_version, all within a transaction.
-async fn run_single_migration(pool: &SqlitePool, sql: &str, new_version: i32) -> Result<()> {
+async fn run_single_migration(pool: &SqlitePool, sql: &str, new_version: i32) -> Res<()> {
     let mut tx = pool
         .begin()
         .await
@@ -104,7 +103,7 @@ async fn run_single_migration(pool: &SqlitePool, sql: &str, new_version: i32) ->
 
 /// Validates that migrations are available for all versions needed to go from
 /// `current_version` to `target_version`.
-fn validate_migrations(current_version: i32, target_version: i32) -> Result<()> {
+fn validate_migrations(current_version: i32, target_version: i32) -> Res<()> {
     let (start, end) = if current_version < target_version {
         (current_version + 1, target_version)
     } else {
@@ -131,7 +130,7 @@ mod tests {
     use tempfile::TempDir;
 
     /// Helper to create a test database with schema_version bootstrapped at version 0.
-    async fn create_test_db() -> Result<(TempDir, SqlitePool)> {
+    async fn create_test_db() -> Res<(TempDir, SqlitePool)> {
         let temp_dir = TempDir::new().context("Failed to create temp dir")?;
         let db_path = temp_dir.path().join("test.sqlite");
 
@@ -160,7 +159,7 @@ mod tests {
     }
 
     /// Helper to get current schema version from database.
-    async fn get_schema_version(pool: &SqlitePool) -> Result<i32> {
+    async fn get_schema_version(pool: &SqlitePool) -> Res<i32> {
         let row: (i32,) = sqlx::query_as("SELECT MAX(version) FROM schema_version")
             .fetch_one(pool)
             .await
@@ -169,7 +168,7 @@ mod tests {
     }
 
     /// Helper to check if a table exists.
-    async fn table_exists(pool: &SqlitePool, table_name: &str) -> Result<bool> {
+    async fn table_exists(pool: &SqlitePool, table_name: &str) -> Res<bool> {
         let row: (i32,) =
             sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?")
                 .bind(table_name)
