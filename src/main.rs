@@ -1,8 +1,8 @@
 use clap::Parser;
 use std::process::ExitCode;
-use tiller_sync::args::{Args, Command, UpDown};
+use tiller_sync::args::{Args, Command, UpDown, UpdateSubcommand};
 use tiller_sync::{commands, Config, Mode, Result};
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, trace};
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::EnvFilter;
 
@@ -32,39 +32,50 @@ pub async fn main_inner(args: Args) -> Result<()> {
     let mode = Mode::from_env();
 
     // Route to appropriate command handler
-    match args.command() {
+    let _: () = match args.command() {
         Command::Init(init_args) => {
-            commands::init(home, init_args.client_secret(), init_args.sheet_url()).await
+            commands::init(home, init_args.client_secret(), init_args.sheet_url())
+                .await?
+                .print()
         }
+
         Command::Auth(auth_args) => {
             let config = Config::load(home).await?;
             if auth_args.verify() {
-                commands::auth_verify(&config).await
+                commands::auth_verify(&config).await?.print()
             } else {
-                commands::auth(&config).await
+                commands::auth(&config).await?.print()
             }
         }
+
         Command::Sync(sync_args) => {
-            let message = match sync_args.direction() {
-                UpDown::Up => {
-                    commands::sync_up(
-                        Config::load(home).await?,
-                        mode,
-                        sync_args.force(),
-                        sync_args.formulas(),
-                    )
-                    .await?
-                }
-                UpDown::Down => commands::sync_down(Config::load(home).await?, mode).await?,
-            };
-            info!("{message}");
-            Ok(())
-        }
-        Command::Mcp(_mcp_args) => {
             let config = Config::load(home).await?;
-            commands::mcp(config, mode).await
+            match sync_args.direction() {
+                UpDown::Up => {
+                    commands::sync_up(config, mode, sync_args.force(), sync_args.formulas())
+                        .await?
+                        .print()
+                }
+                UpDown::Down => commands::sync_down(config, mode).await?.print(),
+            }
         }
-    }
+
+        Command::Mcp(_mcp_args) => commands::mcp(Config::load(home).await?, mode)
+            .await?
+            .print(),
+
+        Command::Update(update_args) => {
+            let config = Config::load(home).await?;
+            match update_args.entity() {
+                UpdateSubcommand::Transactions(args) => {
+                    commands::update_transactions(config, args.to_owned())
+                        .await?
+                        .print()
+                }
+            }
+        }
+    };
+    Ok(())
 }
 
 /// Initializes the tracing subscriber.

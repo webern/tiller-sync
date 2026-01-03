@@ -1,7 +1,12 @@
 //! These structs provide the CLI interface for the tiller CLI.
 
 use crate::commands::FormulasMode;
+use crate::error::{ErrorType, IntoResult};
+use crate::model::TransactionUpdates;
+use crate::Result;
+use anyhow::anyhow;
 use clap::{Parser, Subcommand};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::fmt::{Display, Formatter};
@@ -73,6 +78,8 @@ pub enum Command {
     /// This launches a long-running process that communicates via JSON-RPC over stdin/stdout.
     /// MCP clients (like Claude Code) launch this as a subprocess.
     Mcp(McpArgs),
+    /// Update a transaction, category, or autocat rule in the local database.
+    Update(Box<UpdateArgs>),
 }
 
 /// Arguments common to all subcommands.
@@ -230,6 +237,68 @@ pub struct McpArgs {
     // The --tiller-home flag is inherited from Common.
 }
 
+/// Args for the `tiller update` command.
+#[derive(Debug, Parser, Clone)]
+pub struct UpdateArgs {
+    #[command(subcommand)]
+    entity: UpdateSubcommand,
+}
+
+impl UpdateArgs {
+    pub fn entity(&self) -> &UpdateSubcommand {
+        &self.entity
+    }
+}
+
+/// Subcommands for `tiller update`.
+#[derive(Subcommand, Debug, Clone)]
+pub enum UpdateSubcommand {
+    /// Update one or more transactions by ID.
+    Transactions(UpdateTransactionsArgs),
+}
+
+/// Args for the `tiller update transactions` command.
+///
+/// Updates one or more transactions in the local SQLite database by their IDs. At least one
+/// transaction ID must be provided. When more than one ID is provided, all specified transactions
+/// are updated with the same field values.
+///
+/// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
+#[derive(Debug, Parser, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UpdateTransactionsArgs {
+    /// One or more transaction IDs to update. All specified transactions will receive the same
+    /// updates.
+    #[arg(long, num_args = 1..)]
+    ids: Vec<String>,
+
+    /// The fields to update. Only fields with values will be modified; unspecified fields remain
+    /// unchanged.
+    #[clap(flatten)]
+    updates: TransactionUpdates,
+}
+
+impl UpdateTransactionsArgs {
+    pub fn new<S, I>(ids: I, updates: TransactionUpdates) -> Result<Self>
+    where
+        S: Into<String>,
+        I: IntoIterator<Item = S>,
+    {
+        let ids: Vec<String> = ids.into_iter().map(|s| s.into()).collect();
+        if ids.is_empty() {
+            return Err(anyhow!("At least one ID is required")).pub_result(ErrorType::Request);
+        }
+        Ok(Self { ids, updates })
+    }
+
+    pub fn ids(&self) -> &[String] {
+        &self.ids
+    }
+
+    pub fn updates(&self) -> &TransactionUpdates {
+        &self.updates
+    }
+}
+
 fn default_tiller_home() -> DisplayPath {
     DisplayPath(match dirs::home_dir() {
         Some(home) => home.join("tiller"),
@@ -277,7 +346,7 @@ impl Display for DisplayPath {
 impl FromStr for DisplayPath {
     type Err = Infallible;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         Ok(Self(PathBuf::from(s)))
     }
 }

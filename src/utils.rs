@@ -1,5 +1,5 @@
 use crate::error::Res;
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use serde::de::DeserializeOwned;
 use std::path::{Path, PathBuf};
 use tokio::fs::ReadDir;
@@ -96,4 +96,12 @@ pub(crate) async fn remove(path: impl AsRef<Path>) -> Res<()> {
                 path.as_ref().to_string_lossy()
             )
         })
+}
+
+/// Parses update strings in "FIELD=VALUE" format into `("FIELD", "VALUE")`.
+pub(crate) fn parse_key_val(key_val: &str) -> Res<(String, String)> {
+    key_val
+        .split_once('=')
+        .map(|x| (x.0.to_string(), x.1.to_string()))
+        .ok_or_else(|| anyhow!("Invalid format '{}', expected FIELD=VALUE", key_val))
 }

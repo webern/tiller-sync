@@ -5,7 +5,9 @@
 
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
+use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::borrow::Cow;
 use std::error::Error;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
@@ -242,6 +244,20 @@ impl From<Decimal> for Amount {
 impl From<Amount> for Decimal {
     fn from(amount: Amount) -> Self {
         amount.value()
+    }
+}
+
+impl JsonSchema for Amount {
+    fn schema_name() -> Cow<'static, str> {
+        "Amount".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "type": "string",
+            "description": "A decimal number, with or without a dollar sign, negative sign or \
+            commas. Examples: 1.0 or -1 or -$1.21 or $3,452.12",
+        })
     }
 }
 
