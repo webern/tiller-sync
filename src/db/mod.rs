@@ -166,7 +166,7 @@ impl Db {
             existing_ids.iter().map(|s| s.as_str()).collect();
         for transaction in data.transactions.data() {
             if existing_set.contains(transaction.transaction_id.as_str()) {
-                self._update_transaction(transaction).await?;
+                self.update_transaction(transaction).await?;
             } else {
                 self._insert_transaction(transaction).await?;
             }
@@ -568,7 +568,7 @@ impl Db {
     }
 
     /// Updates an existing transaction in the database.
-    pub(crate) async fn _update_transaction(&self, transaction: &Transaction) -> Res<()> {
+    pub(crate) async fn update_transaction(&self, transaction: &Transaction) -> Res<()> {
         let other_fields_json = if transaction.other_fields.is_empty() {
             None
         } else {
@@ -622,7 +622,7 @@ impl Db {
     }
 
     /// Retrieves a transaction by its ID.
-    pub(crate) async fn _get_transaction(&self, id: &str) -> Res<Option<Transaction>> {
+    pub(crate) async fn get_transaction(&self, id: &str) -> Res<Option<Transaction>> {
         use sqlx::Row;
 
         let row = sqlx::query(
@@ -1243,7 +1243,7 @@ mod tests {
         transaction.institution = "Test Bank".to_string();
         transaction.account_id = "acct-001".to_string();
 
-        db._update_transaction(&transaction).await.unwrap();
+        db.update_transaction(&transaction).await.unwrap();
 
         // Verify the update
         let row: (String,) =
@@ -1269,7 +1269,7 @@ mod tests {
         .await
         .unwrap();
 
-        let transaction = db._get_transaction("txn-001").await.unwrap();
+        let transaction = db.get_transaction("txn-001").await.unwrap();
 
         assert!(transaction.is_some());
         let transaction = transaction.unwrap();
@@ -1498,7 +1498,7 @@ mod tests {
         let db_path = temp_dir.path().join("test.sqlite");
         let db = Db::init(&db_path).await.unwrap();
 
-        let result = db._get_transaction("non-existent-id").await.unwrap();
+        let result = db.get_transaction("non-existent-id").await.unwrap();
         assert!(result.is_none());
     }
 
@@ -1544,7 +1544,7 @@ mod tests {
         db._insert_transaction(&transaction).await.unwrap();
 
         // Retrieve and verify other_fields was stored
-        let retrieved = db._get_transaction("txn-other").await.unwrap().unwrap();
+        let retrieved = db.get_transaction("txn-other").await.unwrap().unwrap();
         assert_eq!(
             retrieved.other_fields.get("Custom Column"),
             Some(&"custom value".to_string())

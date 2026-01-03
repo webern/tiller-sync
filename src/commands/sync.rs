@@ -1,4 +1,4 @@
-use super::FormulasMode;
+use super::{FormulasMode, Out};
 use crate::api::{sheet, tiller, Mode, Tiller};
 use crate::backup::{SYNC_DOWN, SYNC_UP_PRE};
 use crate::error::{ErrorType, IntoResult};
@@ -8,7 +8,7 @@ use tracing::{debug, info, warn};
 
 /// Gets data from the tiller Google sheet and persists it to the local datastore. Returns an info
 /// message that can be printed for the user.
-pub async fn sync_down(config: Config, mode: Mode) -> Result<String> {
+pub async fn sync_down(config: Config, mode: Mode) -> Result<Out<()>> {
     // Backup SQLite database before modifying
     let sqlite_backup = config
         .backup()
@@ -37,12 +37,12 @@ pub async fn sync_down(config: Config, mode: Mode) -> Result<String> {
         .await
         .pub_result(ErrorType::Database)?;
 
-    Ok(format!(
+    Ok(Out::new_message(format!(
         "Synced {} transactions, {} categories, {} autocat rules from sheet to local datastore",
         tiller_data.transactions.data().len(),
         tiller_data.categories.data().len(),
         tiller_data.auto_cats.data().len()
-    ))
+    )))
 }
 
 /// Sends data from the local datastore to the Google sheet, returns a message that can be printed
@@ -52,7 +52,7 @@ pub async fn sync_up(
     mode: Mode,
     force: bool,
     formulas_mode: FormulasMode,
-) -> Result<String> {
+) -> Result<Out<()>> {
     // Precondition: verify database has transactions
     if config
         .db()
@@ -188,71 +188,17 @@ pub async fn sync_up(
         txn_count, cat_count, ac_count
     );
 
-    Ok(format!(
+    Ok(Out::new_message(format!(
         "Synced {txn_count} transactions, {cat_count} categories, {ac_count} autocat rules \
         from local datastore to sheet",
-    ))
+    )))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::{SheetCall, TestSheet, TestSheetState, MODE_ENV};
-    use tempfile::TempDir;
-    use uuid::Uuid;
-
-    /// Test environment that sets up a tiller home directory with Config and database.
-    /// Holds TempDir to keep the directory alive for the duration of the test.
-    struct TestEnv {
-        _temp_dir: TempDir,
-        config: Config,
-    }
-
-    impl TestEnv {
-        /// Creates a test environment with Config and initialized database.
-        async fn new() -> Self {
-            let temp_dir = TempDir::new().unwrap();
-            let root = temp_dir.path().join("tiller");
-            let secret_path = temp_dir.path().join("client_secret.json");
-
-            // Create minimal client_secret.json
-            let secret_content = r#"{
-                "installed": {
-                    "client_id": "test-client-id",
-                    "client_secret": "test-secret",
-                    "redirect_uris": ["http://localhost"],
-                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                    "token_uri": "https://oauth2.googleapis.com/token"
-                }
-            }"#;
-            std::fs::write(&secret_path, secret_content).unwrap();
-
-            let rand = Uuid::new_v4().to_string().replace('-', "");
-            let sheet_url = format!("https://docs.google.com/spreadsheets/d/{}/edit", rand);
-            let config = Config::create(&root, &secret_path, &sheet_url)
-                .await
-                .unwrap();
-
-            Self {
-                _temp_dir: temp_dir,
-                config,
-            }
-        }
-
-        pub(crate) fn get_state(&self) -> TestSheetState {
-            let test_sheet = TestSheet::new(self.config.spreadsheet_id());
-            test_sheet.get_state()
-        }
-
-        pub(crate) fn set_state(&self, state: TestSheetState) {
-            let test_sheet = TestSheet::new(self.config.spreadsheet_id());
-            test_sheet.set_state(state)
-        }
-
-        fn config(&self) -> Config {
-            self.config.clone()
-        }
-    }
+    use crate::api::{SheetCall, TestSheet, MODE_ENV};
+    use crate::test::TestEnv;
 
     #[tokio::test]
     async fn test_sync_down_saves_to_database() {

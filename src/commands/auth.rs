@@ -5,11 +5,11 @@
 //! - `tiller auth --verify` - Verify and refresh authentication
 
 use crate::api::TokenProvider;
+use crate::commands::Out;
 use crate::error::{ErrorType, IntoResult};
 use crate::Config;
 use crate::Result;
 use anyhow::Context;
-use tracing::info;
 
 /// Handles the `tiller auth` command - runs the OAuth consent flow
 ///
@@ -25,11 +25,11 @@ use tracing::info;
 ///
 /// # Errors
 /// Returns an error if OAuth flow fails or if client_secret.json is missing
-pub async fn auth(config: &Config) -> Result<()> {
+pub async fn auth(config: &Config) -> Result<Out<()>> {
     let _ = TokenProvider::initialize(config.client_secret_path(), config.token_path())
         .await
         .pub_result(ErrorType::Auth)?;
-    Ok(())
+    Ok("Successfully authorized the application with a fresh token".into())
 }
 
 /// Handles the `tiller auth --verify` command - verifies authentication
@@ -52,7 +52,7 @@ pub async fn auth(config: &Config) -> Result<()> {
 /// # Errors
 /// Returns an error if verification fails, credentials are missing, or tokens are invalid.
 /// NEVER opens a browser - always returns an error instead.
-pub async fn auth_verify(config: &Config) -> Result<()> {
+pub async fn auth_verify(config: &Config) -> Result<Out<()>> {
     let mut token_provider = TokenProvider::load(config.client_secret_path(), config.token_path())
         .await
         .context(
@@ -65,6 +65,5 @@ pub async fn auth_verify(config: &Config) -> Result<()> {
         .await
         .context("Unable to refresh the token")
         .pub_result(ErrorType::Auth)?;
-    info!("Your OAuth token is valid!");
-    Ok(())
+    Ok("Your OAuth token is valid!".into())
 }

@@ -59,13 +59,13 @@ Categories, and AutoCats. Let's work on these one item at a time. NEVER do multi
     - [x] Create a foreign key constraint between autocats and categories.
     - [x] Update documentation to note these foreign key constraints
 
-- [ ] Update Transactions
-    - [ ] Design and implement a CLI interface and command for updating a single transaction by ID
-    - [ ] Test the command
-    - [ ] Implement an MCP server for the same command
+- [X] Update Transactions
+    - [X] Design and implement a CLI interface and command for updating a single transaction by ID
+    - [X] Test the command
+    - [X] Implement an MCP server for the same command
 
 - [ ] Update Categories
-    - [ ] Design and implement a CLI interface and command for updating a single category by ID
+    - [ ] Design and implement a CLI interface and command for updating a single category by name
     - [ ] Test the command
     - [ ] Implement an MCP server for the same command
 
@@ -172,6 +172,18 @@ The MCP server has two important documentation files in `src/mcp/docs/`:
 - **`INSTRUCTIONS.md`**: In-depth usage guide that the agent must read before using tools. This is
   returned by the `initialize_service` tool and contains detailed information about workflows,
   parameters, and best practices.
+
+### Restrictive use of Pub
+
+`pub` functions in this library should be restricted to these modules: `commands`, `args`, `model`
+and `error`. Additionally, types taken as arguments of `pub` functions or returned by `pub`
+functions need to also be `public`.
+
+NEVER: change something from `private`, `pub(crate)` or `pub(super)` to `pub` without asking the
+user if it is Ok to do so.
+
+ALWAYS: default to `private` or `pub(crate)` when you are not sure if something needs to be part of
+the public interface.
 
 ## Build and Development Commands
 
