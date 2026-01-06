@@ -403,7 +403,7 @@ impl AsRef<str> for TransactionColumn {
 /// not be changed.
 ///
 /// See tiller documentation for more information about the semantic meanings of transaction
-/// columns: https://help.tiller.com/en/articles/432681-transactions-sheet-columns>
+/// columns: https://help.tiller.com/en/articles/432681-transactions-sheet-columns
 #[derive(Debug, Default, Clone, Parser, Serialize, Deserialize, JsonSchema)]
 pub struct TransactionUpdates {
     /// The posted date (when the transaction cleared) or transaction date (when the transaction
