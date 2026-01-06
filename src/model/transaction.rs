@@ -11,12 +11,12 @@ use std::str::FromStr;
 
 /// Represents a collection of transactions from a Transactions sheet, including the header mapping.
 /// See tiller documentation for more information about the semantic meanings of transaction
-/// columns: https://help.tiller.com/en/articles/432681-transactions-sheet-columns>
+/// columns: https://help.tiller.com/en/articles/432681-transactions-sheet-columns
 pub type Transactions = Items<Transaction>;
 
 /// Represents a single row from the Transactions sheet.
 /// See tiller documentation for more information about the semantic meanings of transaction
-/// columns: https://help.tiller.com/en/articles/432681-transactions-sheet-columns>
+/// columns: https://help.tiller.com/en/articles/432681-transactions-sheet-columns
 #[derive(Default, Debug, Clone, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct Transaction {
@@ -260,7 +260,7 @@ impl Transaction {
 
 /// Represents the known columns that should be found in the transactions sheet.
 /// See tiller documentation for more information about the semantic meanings of transaction
-/// columns: https://help.tiller.com/en/articles/432681-transactions-sheet-columns>
+/// columns: https://help.tiller.com/en/articles/432681-transactions-sheet-columns
 #[derive(
     Default,
     Debug,
