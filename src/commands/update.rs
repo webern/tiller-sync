@@ -66,7 +66,12 @@ pub async fn update_transactions(
         );
     }
 
-    let message = format!("Updated {} transactions", updated.len());
+    let count = updated.len();
+    let message = format!(
+        "Updated {} transaction{}",
+        count,
+        if count == 1 { "" } else { "s" }
+    );
     Ok(Out::new(message, updated))
 }
 
