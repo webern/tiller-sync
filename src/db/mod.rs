@@ -55,7 +55,9 @@ impl Db {
 
         let options = SqliteConnectOptions::from_str(&format!("sqlite:{}", path.display()))
             .context("Failed to parse SQLite connection string")?
-            .create_if_missing(false);
+            .create_if_missing(false)
+            // Enable foreign key constraints by default
+            .pragma("foreign_keys", "ON");
 
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -81,7 +83,9 @@ impl Db {
 
         let options = SqliteConnectOptions::from_str(&format!("sqlite:{}", path.display()))
             .context("Failed to parse SQLite connection string")?
-            .create_if_missing(true);
+            .create_if_missing(true)
+            // Enable foreign key constraints by default
+            .pragma("foreign_keys", "ON");
 
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -108,7 +112,28 @@ impl Db {
     /// - Transactions: upsert (insert new, update existing, delete removed)
     /// - Categories: delete all, then insert all
     /// - AutoCat: delete all, then insert all
+    ///
+    /// Note: Foreign key constraints are temporarily disabled during this operation
+    /// to allow the delete-all-then-insert pattern for categories and autocat.
     pub(crate) async fn save_tiller_data(&self, data: &TillerData) -> Res<()> {
+        // Disable foreign key constraints for bulk sync operation
+        sqlx::query("PRAGMA foreign_keys = OFF")
+            .execute(&self.pool)
+            .await?;
+
+        // Use a closure to ensure FK constraints are re-enabled even on error
+        let result = self.save_tiller_data_inner(data).await;
+
+        // Re-enable foreign key constraints
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&self.pool)
+            .await?;
+
+        result
+    }
+
+    /// Inner implementation of save_tiller_data, called with FK constraints disabled.
+    async fn save_tiller_data_inner(&self, data: &TillerData) -> Res<()> {
         use sqlx::Row;
 
         // Get existing transaction IDs for upsert logic
@@ -141,7 +166,7 @@ impl Db {
             existing_ids.iter().map(|s| s.as_str()).collect();
         for transaction in data.transactions.data() {
             if existing_set.contains(transaction.transaction_id.as_str()) {
-                self._update_transaction(transaction).await?;
+                self.update_transaction(transaction).await?;
             } else {
                 self._insert_transaction(transaction).await?;
             }
@@ -352,7 +377,7 @@ impl Db {
 
         // Query all categories
         let rows = sqlx::query(
-            "SELECT id, category, category_group, type, hide_from_reports, other_fields, original_order FROM categories ORDER BY original_order ASC NULLS LAST, id ASC",
+            "SELECT category, category_group, type, hide_from_reports, other_fields, original_order FROM categories ORDER BY original_order ASC NULLS LAST, category ASC",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -496,6 +521,14 @@ impl Db {
             Some(serde_json::to_string(&transaction.other_fields)?)
         };
 
+        // Convert empty category to NULL for FK constraint compatibility
+        // (uncategorized transactions have no category reference)
+        let category = if transaction.category.is_empty() {
+            None
+        } else {
+            Some(&transaction.category)
+        };
+
         sqlx::query(
             r#"INSERT INTO transactions (
                 transaction_id, date, description, amount, account, account_number,
@@ -519,7 +552,7 @@ impl Db {
         .bind(&transaction.date_added)
         .bind(&transaction.merchant_name)
         .bind(&transaction.category_hint)
-        .bind(&transaction.category)
+        .bind(category)
         .bind(&transaction.note)
         .bind(&transaction.tags)
         .bind(&transaction.categorized_date)
@@ -535,11 +568,18 @@ impl Db {
     }
 
     /// Updates an existing transaction in the database.
-    pub(crate) async fn _update_transaction(&self, transaction: &Transaction) -> Res<()> {
+    pub(crate) async fn update_transaction(&self, transaction: &Transaction) -> Res<()> {
         let other_fields_json = if transaction.other_fields.is_empty() {
             None
         } else {
             Some(serde_json::to_string(&transaction.other_fields)?)
+        };
+
+        // Convert empty category to NULL for FK constraint compatibility
+        let category = if transaction.category.is_empty() {
+            None
+        } else {
+            Some(&transaction.category)
         };
 
         sqlx::query(
@@ -565,7 +605,7 @@ impl Db {
         .bind(&transaction.date_added)
         .bind(&transaction.merchant_name)
         .bind(&transaction.category_hint)
-        .bind(&transaction.category)
+        .bind(category)
         .bind(&transaction.note)
         .bind(&transaction.tags)
         .bind(&transaction.categorized_date)
@@ -582,7 +622,7 @@ impl Db {
     }
 
     /// Retrieves a transaction by its ID.
-    pub(crate) async fn _get_transaction(&self, id: &str) -> Res<Option<Transaction>> {
+    pub(crate) async fn get_transaction(&self, id: &str) -> Res<Option<Transaction>> {
         use sqlx::Row;
 
         let row = sqlx::query(
@@ -653,15 +693,15 @@ impl Db {
         }
     }
 
-    /// Inserts a new category into the database. Returns the primary key ID.
-    pub(crate) async fn _insert_category(&self, category: &Category) -> Res<u64> {
+    /// Inserts a new category into the database. Returns the category name (primary key).
+    pub(crate) async fn _insert_category(&self, category: &Category) -> Res<String> {
         let other_fields_json = if category.other_fields.is_empty() {
             None
         } else {
             Some(serde_json::to_string(&category.other_fields)?)
         };
 
-        let result = sqlx::query(
+        sqlx::query(
             r#"INSERT INTO categories (category, category_group, type, hide_from_reports, other_fields, original_order)
             VALUES (?, ?, ?, ?, ?, ?)"#,
         )
@@ -675,46 +715,59 @@ impl Db {
         .await
         .context("Failed to insert category")?;
 
-        Ok(result.last_insert_rowid() as u64)
+        Ok(category.category.clone())
     }
 
-    /// Updates an existing category in the database. Returns the primary key ID.
-    pub(crate) async fn _update_category(&self, category: &_Row<Category>) -> Res<u64> {
-        let other_fields_json = if category.row.other_fields.is_empty() {
+    /// Updates an existing category in the database.
+    ///
+    /// The `old_name` parameter is used to find the existing category.
+    /// If `new_data.category` differs from `old_name`, the category is renamed.
+    /// Due to `ON UPDATE CASCADE` foreign key constraints, renaming a category
+    /// automatically updates all references in transactions and autocat.
+    ///
+    /// Returns the new category name.
+    pub(crate) async fn _update_category(
+        &self,
+        old_name: &str,
+        new_data: &Category,
+    ) -> Res<String> {
+        let other_fields_json = if new_data.other_fields.is_empty() {
             None
         } else {
-            Some(serde_json::to_string(&category.row.other_fields)?)
+            Some(serde_json::to_string(&new_data.other_fields)?)
         };
 
-        sqlx::query(
+        let result = sqlx::query(
             r#"UPDATE categories SET
                 category = ?, category_group = ?, type = ?, hide_from_reports = ?, other_fields = ?
-            WHERE id = ?"#,
+            WHERE category = ?"#,
         )
-        .bind(&category.row.category)
-        .bind(&category.row.category_group)
-        .bind(&category.row.r#type)
-        .bind(&category.row.hide_from_reports)
+        .bind(&new_data.category)
+        .bind(&new_data.category_group)
+        .bind(&new_data.r#type)
+        .bind(&new_data.hide_from_reports)
         .bind(&other_fields_json)
-        .bind(category.id as i64)
+        .bind(old_name)
         .execute(&self.pool)
         .await
         .context("Failed to update category")?;
 
-        Ok(category.id)
+        if result.rows_affected() == 0 {
+            bail!("Category '{}' not found", old_name);
+        }
+
+        Ok(new_data.category.clone())
     }
 
-    /// Retrieves a category by its ID.
-    pub(crate) async fn _get_category(&self, id: &str) -> Res<Option<_Row<Category>>> {
+    /// Retrieves a category by its name (primary key).
+    pub(crate) async fn _get_category(&self, name: &str) -> Res<Option<Category>> {
         use sqlx::Row;
 
-        let id_num: i64 = id.parse().context("Invalid category ID")?;
-
         let row = sqlx::query(
-            r#"SELECT id, category, category_group, type, hide_from_reports, other_fields, original_order
-            FROM categories WHERE id = ?"#,
+            r#"SELECT category, category_group, type, hide_from_reports, other_fields, original_order
+            FROM categories WHERE category = ?"#,
         )
-        .bind(id_num)
+        .bind(name)
         .fetch_optional(&self.pool)
         .await
         .context("Failed to get category")?;
@@ -728,20 +781,17 @@ impl Db {
                     None => BTreeMap::new(),
                 };
 
-                Ok(Some(_Row {
-                    id: r.get::<i64, _>("id") as u64,
-                    row: Category {
-                        category: r.get("category"),
-                        category_group: r
-                            .get::<Option<String>, _>("category_group")
-                            .unwrap_or_default(),
-                        r#type: r.get::<Option<String>, _>("type").unwrap_or_default(),
-                        hide_from_reports: r
-                            .get::<Option<String>, _>("hide_from_reports")
-                            .unwrap_or_default(),
-                        other_fields,
-                        original_order: r.get::<Option<u64>, _>("original_order"),
-                    },
+                Ok(Some(Category {
+                    category: r.get("category"),
+                    category_group: r
+                        .get::<Option<String>, _>("category_group")
+                        .unwrap_or_default(),
+                    r#type: r.get::<Option<String>, _>("type").unwrap_or_default(),
+                    hide_from_reports: r
+                        .get::<Option<String>, _>("hide_from_reports")
+                        .unwrap_or_default(),
+                    other_fields,
+                    original_order: r.get::<Option<u64>, _>("original_order"),
                 }))
             }
         }
@@ -755,6 +805,13 @@ impl Db {
             Some(serde_json::to_string(&autocat.other_fields)?)
         };
 
+        // Convert empty category to NULL for FK constraint compatibility
+        let category = if autocat.category.is_empty() {
+            None
+        } else {
+            Some(&autocat.category)
+        };
+
         let result = sqlx::query(
             r#"INSERT INTO autocat (
                 category, description, description_contains, account_contains,
@@ -763,7 +820,7 @@ impl Db {
                 amount_contains, other_fields, original_order
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
-        .bind(&autocat.category)
+        .bind(category)
         .bind(&autocat.description)
         .bind(&autocat.description_contains)
         .bind(&autocat.account_contains)
@@ -807,6 +864,13 @@ impl Db {
             Some(serde_json::to_string(&autocat.row.other_fields)?)
         };
 
+        // Convert empty category to NULL for FK constraint compatibility
+        let category = if autocat.row.category.is_empty() {
+            None
+        } else {
+            Some(&autocat.row.category)
+        };
+
         sqlx::query(
             r#"UPDATE autocat SET
                 category = ?, description = ?, description_contains = ?, account_contains = ?,
@@ -815,7 +879,7 @@ impl Db {
                 amount_contains = ?, other_fields = ?
             WHERE id = ?"#,
         )
-        .bind(&autocat.row.category)
+        .bind(category)
         .bind(&autocat.row.description)
         .bind(&autocat.row.description_contains)
         .bind(&autocat.row.account_contains)
@@ -1179,7 +1243,7 @@ mod tests {
         transaction.institution = "Test Bank".to_string();
         transaction.account_id = "acct-001".to_string();
 
-        db._update_transaction(&transaction).await.unwrap();
+        db.update_transaction(&transaction).await.unwrap();
 
         // Verify the update
         let row: (String,) =
@@ -1205,7 +1269,7 @@ mod tests {
         .await
         .unwrap();
 
-        let transaction = db._get_transaction("txn-001").await.unwrap();
+        let transaction = db.get_transaction("txn-001").await.unwrap();
 
         assert!(transaction.is_some());
         let transaction = transaction.unwrap();
@@ -1225,12 +1289,13 @@ mod tests {
         category.r#type = "Expense".to_string();
         category.hide_from_reports = "".to_string();
 
-        let id = db._insert_category(&category).await.unwrap();
+        let name = db._insert_category(&category).await.unwrap();
+        assert_eq!(name, "Groceries");
 
         // Verify by querying directly
         let row: (String, String) =
-            sqlx::query_as("SELECT category, category_group FROM categories WHERE id = ?")
-                .bind(id as i64)
+            sqlx::query_as("SELECT category, category_group FROM categories WHERE category = ?")
+                .bind(&name)
                 .fetch_one(&db.pool)
                 .await
                 .unwrap();
@@ -1253,35 +1318,33 @@ mod tests {
         .await
         .unwrap();
 
-        // Get the inserted ID
-        let (id,): (i64,) = sqlx::query_as("SELECT last_insert_rowid()")
-            .fetch_one(&db.pool)
-            .await
-            .unwrap();
+        // Update via the method (renaming from "Groceries" to "Updated Groceries")
+        let mut new_data = Category::default();
+        new_data.category = "Updated Groceries".to_string();
+        new_data.category_group = "Updated Food".to_string();
+        new_data.r#type = "Expense".to_string();
+        new_data.hide_from_reports = "".to_string();
 
-        // Update via the method
-        let mut category = Category::default();
-        category.category = "Updated Groceries".to_string();
-        category.category_group = "Updated Food".to_string();
-        category.r#type = "Expense".to_string();
-        category.hide_from_reports = "".to_string();
+        db._update_category("Groceries", &new_data).await.unwrap();
 
-        let row = _Row {
-            id: id as u64,
-            row: category,
-        };
-
-        db._update_category(&row).await.unwrap();
-
-        // Verify the update
+        // Verify the update by querying with the new name
         let (name, group): (String, String) =
-            sqlx::query_as("SELECT category, category_group FROM categories WHERE id = ?")
-                .bind(id)
+            sqlx::query_as("SELECT category, category_group FROM categories WHERE category = ?")
+                .bind("Updated Groceries")
                 .fetch_one(&db.pool)
                 .await
                 .unwrap();
         assert_eq!(name, "Updated Groceries");
         assert_eq!(group, "Updated Food");
+
+        // Verify old name no longer exists
+        let old_exists: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM categories WHERE category = ?")
+                .bind("Groceries")
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(old_exists.0, 0);
     }
 
     #[tokio::test]
@@ -1299,19 +1362,13 @@ mod tests {
         .await
         .unwrap();
 
-        // Get the inserted ID
-        let (id,): (i64,) = sqlx::query_as("SELECT last_insert_rowid()")
-            .fetch_one(&db.pool)
-            .await
-            .unwrap();
-
-        let result = db._get_category(&id.to_string()).await.unwrap();
+        // Get by category name (primary key)
+        let result = db._get_category("Groceries").await.unwrap();
 
         assert!(result.is_some());
-        let row = result.unwrap();
-        assert_eq!(row.id, id as u64);
-        assert_eq!(row.row.category, "Groceries");
-        assert_eq!(row.row.category_group, "Food");
+        let category = result.unwrap();
+        assert_eq!(category.category, "Groceries");
+        assert_eq!(category.category_group, "Food");
     }
 
     #[tokio::test]
@@ -1319,6 +1376,12 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.sqlite");
         let db = Db::init(&db_path).await.unwrap();
+
+        // Insert category first (FK constraint requires it)
+        sqlx::query("INSERT INTO categories (category) VALUES ('Groceries')")
+            .execute(&db.pool)
+            .await
+            .unwrap();
 
         let mut autocat = AutoCat::default();
         autocat.category = "Groceries".to_string();
@@ -1343,6 +1406,16 @@ mod tests {
         let db_path = temp_dir.path().join("test.sqlite");
         let db = Db::init(&db_path).await.unwrap();
 
+        // Insert categories first (FK constraint requires them)
+        sqlx::query("INSERT INTO categories (category) VALUES ('Groceries')")
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO categories (category) VALUES ('Updated Groceries')")
+            .execute(&db.pool)
+            .await
+            .unwrap();
+
         // Insert an autocat rule directly
         sqlx::query(
             "INSERT INTO autocat (category, description_contains)
@@ -1358,7 +1431,7 @@ mod tests {
             .await
             .unwrap();
 
-        // Update via the method
+        // Update via the method (changing category from Groceries to Updated Groceries)
         let mut autocat = AutoCat::default();
         autocat.category = "Updated Groceries".to_string();
         autocat.description_contains = "updated grocery".to_string();
@@ -1386,6 +1459,12 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.sqlite");
         let db = Db::init(&db_path).await.unwrap();
+
+        // Insert category first (FK constraint requires it)
+        sqlx::query("INSERT INTO categories (category) VALUES ('Groceries')")
+            .execute(&db.pool)
+            .await
+            .unwrap();
 
         // Insert an autocat rule directly
         sqlx::query(
@@ -1419,7 +1498,7 @@ mod tests {
         let db_path = temp_dir.path().join("test.sqlite");
         let db = Db::init(&db_path).await.unwrap();
 
-        let result = db._get_transaction("non-existent-id").await.unwrap();
+        let result = db.get_transaction("non-existent-id").await.unwrap();
         assert!(result.is_none());
     }
 
@@ -1429,7 +1508,8 @@ mod tests {
         let db_path = temp_dir.path().join("test.sqlite");
         let db = Db::init(&db_path).await.unwrap();
 
-        let result = db._get_category("99999").await.unwrap();
+        // Look up a category that doesn't exist
+        let result = db._get_category("Non-existent Category").await.unwrap();
         assert!(result.is_none());
     }
 
@@ -1464,7 +1544,7 @@ mod tests {
         db._insert_transaction(&transaction).await.unwrap();
 
         // Retrieve and verify other_fields was stored
-        let retrieved = db._get_transaction("txn-other").await.unwrap().unwrap();
+        let retrieved = db.get_transaction("txn-other").await.unwrap().unwrap();
         assert_eq!(
             retrieved.other_fields.get("Custom Column"),
             Some(&"custom value".to_string())
@@ -1483,12 +1563,13 @@ mod tests {
             .other_fields
             .insert("Extra Field".to_string(), "extra value".to_string());
 
-        let id = db._insert_category(&category).await.unwrap();
+        let name = db._insert_category(&category).await.unwrap();
+        assert_eq!(name, "Test Category");
 
         // Retrieve and verify other_fields was stored
-        let retrieved = db._get_category(&id.to_string()).await.unwrap().unwrap();
+        let retrieved = db._get_category(&name).await.unwrap().unwrap();
         assert_eq!(
-            retrieved.row.other_fields.get("Extra Field"),
+            retrieved.other_fields.get("Extra Field"),
             Some(&"extra value".to_string())
         );
     }

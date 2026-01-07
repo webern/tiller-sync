@@ -468,7 +468,7 @@ const TRANSACTION_DATA: &str = r##",Date,Description,Category,Amount,Account,Acc
 ,10/4/2025,Starbucks #1923,Coffee Shops,-$5.95,Credit Card 1,xxxx1234,Bank A,10/1/25,9/28/25,tx001a2b3c4d5e6f7g8h9i17,acct001a2b3c4d5e6f7g,,STARBUCKS #1923,10/5/25,10/5/2025 8:12:05 AM,5.95
 ,10/3/2025,Shell Station #4521,Gas & Fuel,-$61.45,Credit Card 1,xxxx1234,Bank A,10/1/25,9/28/25,tx001a2b3c4d5e6f7g8h9i18,acct001a2b3c4d5e6f7g,,SHELL STATION #4521,10/4/25,10/4/2025 4:55:22 PM,61.45
 ,10/2/2025,In-N-Out Burger,Restaurants,-$9.75,Credit Card 1,xxxx1234,Bank A,10/1/25,9/28/25,tx001a2b3c4d5e6f7g8h9i19,acct001a2b3c4d5e6f7g,,IN-N-OUT BURGER,10/3/25,10/3/2025 6:40:11 PM,9.75
-,10/1/2025,City Water District,Utilities,-$45.88,Checking 1,xxxx5678,Bank A,10/1/25,9/28/25,tx001a2b3c4d5e6f7g8h9i20,acct002a2b3c4d5e6f7g,,CITY WATER DISTRICT,10/2/25,10/2/2025 6:00:00 AM,45.88
+,10/1/2025,City Water District,,-$45.88,Checking 1,xxxx5678,Bank A,10/1/25,9/28/25,tx001a2b3c4d5e6f7g8h9i20,acct002a2b3c4d5e6f7g,,CITY WATER DISTRICT,10/2/25,10/2/2025 6:00:00 AM,45.88
 "##;
 
 /// Seed category data.

@@ -9,6 +9,10 @@ pub mod mcp;
 pub mod model;
 mod utils;
 
+// Only included during tests
+#[cfg(test)]
+pub(crate) mod test;
+
 pub use api::Mode;
 pub use config::Config;
 pub use error::{Result, TillerError};

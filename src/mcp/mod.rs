@@ -12,7 +12,8 @@ macro_rules! require_init {
     };
 }
 
-mod sync;
+mod mcp_utils;
+mod tools;
 
 use crate::{Config, Mode};
 use rmcp::handler::server::tool::ToolRouter;
@@ -136,31 +137,10 @@ pub(crate) async fn run_server(config: Config, mode: Mode, io: Io) -> crate::Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Config;
+    use crate::args::UpdateTransactionsArgs;
+    use crate::test::TestEnv;
     use rmcp::ServiceExt;
-    use tempfile::TempDir;
     use tokio::io::duplex;
-
-    /// Create a test Config with temporary directories.
-    async fn create_test_config() -> (Config, TempDir) {
-        let dir = TempDir::new().unwrap();
-        let home_dir = dir.path().join("tiller_home");
-        let secret_source_file = dir.path().join("client_secret.json");
-
-        // Write a minimal client_secret.json
-        let secret_content = r#"{"installed":{"client_id":"test","client_secret":"test","redirect_uris":["http://localhost"]}}"#;
-        crate::utils::write(&secret_source_file, secret_content)
-            .await
-            .unwrap();
-
-        let sheet_url = "https://docs.google.com/spreadsheets/d/TestSheetId/edit";
-
-        let config = Config::create(&home_dir, &secret_source_file, sheet_url)
-            .await
-            .unwrap();
-
-        (config, dir)
-    }
 
     /// Integration test for the MCP server using an in-memory transport.
     /// Tests initialize_service, sync_down, and sync_up tools.
@@ -169,8 +149,9 @@ mod tests {
         // Create duplex channel - one end for server, one for client
         let (client_io, server_io) = duplex(4096);
 
-        // Create test config (keep TempDir alive for duration of test)
-        let (config, _temp_dir) = create_test_config().await;
+        // Create test environment (holds TempDir alive for duration of test)
+        let env = TestEnv::new().await;
+        let config = env.config();
 
         // Spawn server in background task
         let server_handle =
@@ -233,6 +214,36 @@ mod tests {
             sync_up_result.content
         );
 
+        // Test 4: Call update_transaction tool
+        // After sync_down, we have transactions in the database. Get one to update.
+        let tiller_data = env.config().db().get_tiller_data().await.unwrap();
+        let first_txn = &tiller_data.transactions.data()[0];
+        let txn_id = first_txn.transaction_id.clone();
+        let updates = crate::model::TransactionUpdates {
+            note: Some("Updated via MCP".to_string()),
+            ..Default::default()
+        };
+        let updates = UpdateTransactionsArgs::new(vec![txn_id], updates).unwrap();
+        let updates_json = serde_json::to_value(&updates)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .clone();
+
+        let update_result = client
+            .call_tool(rmcp::model::CallToolRequestParam {
+                name: "update_transactions".into(),
+                arguments: Some(updates_json),
+            })
+            .await
+            .expect("update_transactions call failed");
+
+        assert!(
+            !update_result.is_error.unwrap_or(false),
+            "update_transactions returned error: {:?}",
+            update_result.content
+        );
+
         // Drop client to trigger server shutdown
         drop(client);
 
@@ -247,5 +258,75 @@ mod tests {
             "Server returned error: {:?}",
             server_result
         );
+    }
+
+    /// Queries MCP tool definitions and writes them to `.ignore/mcp_tools.txt`.
+    /// This provides a human-readable dump of the tool schemas for inspection.
+    #[tokio::test]
+    async fn write_mcp_tools_to_file() {
+        use std::fs::{self, File};
+        use std::io::Write;
+        use std::path::PathBuf;
+
+        fn project_root() -> PathBuf {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        }
+
+        // Create duplex channel
+        let (client_io, server_io) = duplex(4096);
+
+        // Create test environment
+        let env = TestEnv::new().await;
+        let config = env.config();
+
+        // Spawn server in background
+        let _server_handle =
+            tokio::spawn(
+                async move { run_server(config, Mode::Testing, Io::Mock(server_io)).await },
+            );
+
+        // Create MCP client
+        let client = ().serve(client_io).await.expect("Failed to create client");
+
+        // Get the list of tools
+        let tools_response = client
+            .list_tools(Default::default())
+            .await
+            .expect("Failed to list tools");
+
+        // Build output string
+        let mut output = String::new();
+        output.push_str(&format!(
+            "=== MCP Tools ({} total) ===\n\n",
+            tools_response.tools.len()
+        ));
+
+        for tool in &tools_response.tools {
+            output.push_str(
+                "────────────────────────────────────────────────────────────────────────────────\n",
+            );
+            output.push_str(&format!("TOOL: {}\n", tool.name));
+            output.push_str(
+                "────────────────────────────────────────────────────────────────────────────────\n",
+            );
+            output.push_str("\nDescription:\n");
+            if let Some(desc) = &tool.description {
+                for desc_line in desc.lines() {
+                    output.push_str(&format!("  {}\n", desc_line));
+                }
+            }
+            output.push_str("\nInput Schema:\n");
+            output.push_str(&serde_json::to_string_pretty(&tool.input_schema).unwrap());
+            output.push_str("\n\n");
+        }
+
+        // Write to .ignore/mcp_tools.txt
+        let ignore_dir = project_root().join(".ignore");
+        fs::create_dir_all(&ignore_dir).expect("Failed to create .ignore directory");
+
+        let output_path = ignore_dir.join("mcp_tools.txt");
+        let mut file = File::create(&output_path).expect("Failed to create output file");
+        file.write_all(output.as_bytes())
+            .expect("Failed to write output");
     }
 }

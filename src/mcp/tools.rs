@@ -1,7 +1,8 @@
 //! Implementation of the sync_up and sync_down commands for MCP
 
-use crate::commands;
-use crate::commands::FormulasMode;
+use crate::args::UpdateTransactionsArgs;
+use crate::commands::{self, FormulasMode};
+use crate::mcp::mcp_utils::tool_result;
 use crate::mcp::TillerServer;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
@@ -29,9 +30,9 @@ pub struct SyncUpParams {
 #[tool_router(vis = "pub(super)")]
 impl TillerServer {
     #[tool]
-    /// Initialize the tiller MCP service for this session and return usage instructions. You \
-    /// **MUST** call this **ONCE** before using other tools so that you have the full usage \
-    /// instructions. You **MAY** call it more than once if you have forgotten the usage \
+    /// Initialize the tiller MCP service for this session and return usage instructions. You
+    /// **MUST** call this **ONCE** before using other tools so that you have the full usage
+    /// instructions. You **MAY** call it more than once if you have forgotten the usage
     /// instructions.
     async fn initialize_service(&self) -> Result<CallToolResult, McpError> {
         let mut initialized = self.initialized.lock().await;
@@ -51,7 +52,7 @@ impl TillerServer {
     /// 1. **SQLite backup** (`tiller.sqlite.YYYY-MM-DD-NNN`): Timestamped copy of the existing
     ///    database (if it exists).
     /// 2. **JSON snapshot** (`sync-down.YYYY-MM-DD-NNN.json`): Captures the downloaded sheet data
-    ///    for conflict detection during future `sync up` operations.
+    ///    for conflict detection during future `sync_up` operations.
     ///
     /// # Database Updates
     ///
@@ -61,7 +62,7 @@ impl TillerServer {
     /// - **Categories and AutoCat**: Full replacement. All existing rows are deleted, then all
     ///   sheet rows are inserted.
     /// - **Formulas**: Cell formulas are captured and stored in the `formulas` table for optional
-    ///   preservation during `sync up`.
+    ///   preservation during `sync_up`.
     ///
     /// # Caution
     ///
@@ -73,14 +74,8 @@ impl TillerServer {
         require_init!(self);
         info!("MCP: sync_down called");
         let config = (*self.config).clone();
-        match commands::sync_down(config, self.mode).await {
-            Ok(message) => Ok(CallToolResult::success(vec![rmcp::model::Content::text(
-                message,
-            )])),
-            Err(e) => Ok(CallToolResult::error(vec![rmcp::model::Content::text(
-                format!("sync_down failed: {e}"),
-            )])),
-        }
+        let out = commands::sync_down(config, self.mode).await;
+        tool_result(out)
     }
 
     /// Upload Transactions, Categories, and AutoCat data from the local SQLite database to the
@@ -159,14 +154,58 @@ impl TillerServer {
         );
 
         let config = (*self.config).clone();
-        match commands::sync_up(config, self.mode, params.force, params.formulas).await {
-            Ok(message) => Ok(CallToolResult::success(vec![rmcp::model::Content::text(
-                message,
-            )])),
-            Err(e) => Ok(CallToolResult::error(vec![rmcp::model::Content::text(
-                format!("sync_up failed: {e}"),
-            )])),
-        }
+        let out = commands::sync_up(config, self.mode, params.force, params.formulas).await;
+        tool_result(out)
+    }
+
+    /// Update one or more transactions in the local database by their IDs.
+    ///
+    /// This tool modifies transaction fields in the local SQLite database. When more than one ID
+    /// is provided, all specified transactions receive the same updates. Changes are NOT
+    /// automatically synced to the Google Sheet - call `sync_up` to upload local changes.
+    ///
+    /// # Parameters
+    ///
+    /// - `ids`: One or more transaction IDs to update. All specified transactions will receive the
+    ///   same field updates.
+    /// - `updates`: The fields to update. Only fields with values will be modified; unspecified
+    ///   fields remain unchanged. See `TransactionUpdates` for available fields.
+    ///
+    /// # Returns
+    ///
+    /// On success, returns a message indicating how many transactions were updated and a JSON array
+    /// of the updated transaction objects.
+    ///
+    /// # Example
+    ///
+    /// Update one transaction:
+    ///
+    /// ```json
+    /// {
+    ///   "ids": ["abc123"],
+    ///   "category": "Groceries",
+    ///   "note": "Weekly shopping"
+    /// }
+    /// ```
+    ///
+    /// Update more than one transaction with the same values:
+    ///
+    /// ```json
+    /// {
+    ///   "ids": ["abc123", "def456"],
+    ///   "category": "Entertainment"
+    /// }
+    /// ```
+    #[tool]
+    async fn update_transactions(
+        &self,
+        Parameters(args): Parameters<UpdateTransactionsArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        require_init!(self);
+
+        let config = (*self.config).clone();
+        let out = commands::update_transactions(config, args).await;
+        tool_result(out)
     }
 }
 

@@ -16,6 +16,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Implement the Database Layer [#14], [#15], [#16]
 - Implement `tiller sync down` and `tiller sync up`, mostly in [#17]
 - Implement an MCP server for the `sync up` and `sync down` commands [#18]
+- Implement crud [#19]
 
 <!-- @formatter:off -->
 
@@ -39,5 +40,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#16]: https://github.com/webern/tiller-sync/pull/16
 [#17]: https://github.com/webern/tiller-sync/pull/17
 [#18]: https://github.com/webern/tiller-sync/pull/18
+[#19]: https://github.com/webern/tiller-sync/pull/19
 
 <!-- Issues -->
