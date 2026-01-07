@@ -3,7 +3,9 @@
 //! This module contains implementations for all CLI subcommands.
 
 mod auth;
+mod delete;
 mod init;
+mod insert;
 mod mcp;
 mod sync;
 mod update;
@@ -13,10 +15,12 @@ use std::fmt::Debug;
 use tracing::{debug, info};
 
 pub use auth::{auth, auth_verify};
+pub use delete::{delete_autocats, delete_categories, delete_transactions};
 pub use init::init;
+pub use insert::{insert_autocat, insert_category, insert_transaction};
 pub use mcp::mcp;
 pub use sync::{sync_down, sync_up};
-pub use update::{update_transactions, Updates};
+pub use update::{update_autocats, update_categories, update_transactions};
 
 /// The output type for a command. This allows the command to return a consistent message and,
 /// optionally, structured data to both the command line and MCP server interfaces.

@@ -1,6 +1,8 @@
 use clap::Parser;
 use std::process::ExitCode;
-use tiller_sync::args::{Args, Command, UpDown, UpdateSubcommand};
+use tiller_sync::args::{
+    Args, Command, DeleteSubcommand, InsertSubcommand, UpDown, UpdateSubcommand,
+};
 use tiller_sync::{commands, Config, Mode, Result};
 use tracing::{debug, error, trace};
 use tracing_subscriber::filter::LevelFilter;
@@ -68,10 +70,54 @@ pub async fn main_inner(args: Args) -> Result<()> {
             let config = Config::load(home).await?;
             match update_args.entity() {
                 UpdateSubcommand::Transactions(args) => {
-                    commands::update_transactions(config, args.to_owned())
+                    commands::update_transactions(config, *args.clone())
                         .await?
                         .print()
                 }
+                UpdateSubcommand::Categories(args) => {
+                    commands::update_categories(config, args.clone())
+                        .await?
+                        .print()
+                }
+                UpdateSubcommand::Autocats(args) => commands::update_autocats(config, args.clone())
+                    .await?
+                    .print(),
+            }
+        }
+
+        Command::Delete(delete_args) => {
+            let config = Config::load(home).await?;
+            match delete_args.entity() {
+                DeleteSubcommand::Transactions(args) => {
+                    commands::delete_transactions(config, args.clone())
+                        .await?
+                        .print()
+                }
+                DeleteSubcommand::Categories(args) => {
+                    commands::delete_categories(config, args.clone())
+                        .await?
+                        .print()
+                }
+                DeleteSubcommand::Autocats(args) => commands::delete_autocats(config, args.clone())
+                    .await?
+                    .print(),
+            }
+        }
+
+        Command::Insert(insert_args) => {
+            let config = Config::load(home).await?;
+            match insert_args.entity() {
+                InsertSubcommand::Transaction(args) => {
+                    commands::insert_transaction(config, *args.clone())
+                        .await?
+                        .print()
+                }
+                InsertSubcommand::Category(args) => commands::insert_category(config, args.clone())
+                    .await?
+                    .print(),
+                InsertSubcommand::Autocat(args) => commands::insert_autocat(config, *args.clone())
+                    .await?
+                    .print(),
             }
         }
     };

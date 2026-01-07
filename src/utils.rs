@@ -105,3 +105,22 @@ pub(crate) fn parse_key_val(key_val: &str) -> Res<(String, String)> {
         .map(|x| (x.0.to_string(), x.1.to_string()))
         .ok_or_else(|| anyhow!("Invalid format '{}', expected FIELD=VALUE", key_val))
 }
+
+/// Parses an amount string into an `Amount`.
+pub(crate) fn parse_amount(s: &str) -> Res<crate::model::Amount> {
+    s.parse()
+        .with_context(|| format!("Invalid amount format: '{}'", s))
+}
+
+/// Generates a unique transaction ID for locally-created transactions.
+///
+/// The ID format is `user-` followed by a truncated UUIDv4 (dashes removed, truncated to 19
+/// characters), resulting in IDs like `user-f47e8c2a9b3d4f1ea80`.
+///
+/// This distinguishes locally-created transactions from those created by Tiller, which use
+/// 24-character hex IDs without a prefix.
+pub fn generate_transaction_id() -> String {
+    let uuid = uuid::Uuid::new_v4();
+    let hex = uuid.as_simple().to_string(); // 32 hex chars, no dashes
+    format!("user-{}", &hex[..19])
+}

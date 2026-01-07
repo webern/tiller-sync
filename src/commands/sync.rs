@@ -198,6 +198,7 @@ pub async fn sync_up(
 mod tests {
     use super::*;
     use crate::api::{SheetCall, TestSheet, MODE_ENV};
+    use crate::args::DeleteTransactionsArgs;
     use crate::test::TestEnv;
 
     #[tokio::test]
@@ -442,9 +443,8 @@ mod tests {
         let db = config.db();
         let data = db.get_tiller_data().await.unwrap();
         let txn_to_delete = &data.transactions.data()[1]; // Get second transaction
-        db._delete_transaction(&txn_to_delete.transaction_id)
-            .await
-            .unwrap();
+        let delete_args = DeleteTransactionsArgs::new(vec![&txn_to_delete.transaction_id]).unwrap();
+        db.delete_transactions(delete_args).await.unwrap();
 
         // Run sync_up with --formulas preserve (no --force)
         // Should error because gaps detected and formulas would be misaligned
@@ -474,9 +474,8 @@ mod tests {
         let db = config.db();
         let data = db.get_tiller_data().await.unwrap();
         let txn_to_delete = &data.transactions.data()[1];
-        db._delete_transaction(&txn_to_delete.transaction_id)
-            .await
-            .unwrap();
+        let delete_args = DeleteTransactionsArgs::new(vec![&txn_to_delete.transaction_id]).unwrap();
+        db.delete_transactions(delete_args).await.unwrap();
 
         // Run sync_up with --formulas preserve AND --force
         // Should succeed despite gaps
@@ -501,9 +500,8 @@ mod tests {
         let db = config.db();
         let data = db.get_tiller_data().await.unwrap();
         let txn_to_delete = &data.transactions.data()[1];
-        db._delete_transaction(&txn_to_delete.transaction_id)
-            .await
-            .unwrap();
+        let delete_args = DeleteTransactionsArgs::new(vec![&txn_to_delete.transaction_id]).unwrap();
+        db.delete_transactions(delete_args).await.unwrap();
 
         // Run sync_up with --formulas ignore (no --force needed)
         // Should succeed because we're ignoring formulas, so gaps don't matter
