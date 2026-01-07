@@ -64,6 +64,11 @@ Categories, and AutoCats. Let's work on these one item at a time. NEVER do multi
     - [X] Test the command
     - [X] Implement an MCP server for the same command
 
+CLAUDE: when continuing with the following, make sure you follow the precedent set by transactions
+closely. Namely note the presence of `TransactionUpdates` and note that the same "args" object is
+used in the CLI, the MCP tool, and the command function. Note that column documentation was pulled
+from the tiller website and that a link to it is given.
+
 - [ ] Update Categories
     - [ ] Design and implement a CLI interface and command for updating a single category by name
     - [ ] Test the command
