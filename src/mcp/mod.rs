@@ -34,7 +34,6 @@ use tracing::info;
 pub struct TillerServer {
     initialized: Arc<Mutex<bool>>,
     mode: Mode,
-    #[allow(dead_code)]
     config: Arc<Config>,
     tool_router: ToolRouter<TillerServer>,
 }

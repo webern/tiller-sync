@@ -1,6 +1,9 @@
 use crate::error::Res;
 use crate::model::items::{Item, Items};
+use crate::utils;
 use anyhow::bail;
+use clap::Parser;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -21,6 +24,28 @@ pub struct Category {
     /// Row position from last sync down (0-indexed); None for locally-added rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) original_order: Option<u64>,
+}
+
+impl Category {
+    /// Set any of the fields on `self` that are set in `update`.
+    pub fn merge_updates(&mut self, update: CategoryUpdates) {
+        if let Some(x) = update.category {
+            self.category = x;
+        }
+        if let Some(x) = update.group {
+            self.category_group = x;
+        }
+        if let Some(x) = update.r#type {
+            self.r#type = x;
+        }
+        if let Some(x) = update.hide_from_reports {
+            self.hide_from_reports = x;
+        }
+
+        for (key, val) in update.other_fields {
+            self.other_fields.insert(key, val);
+        }
+    }
 }
 
 impl Item for Category {
@@ -100,3 +125,43 @@ pub(super) const CATEGORY_STR: &str = "Category";
 pub(super) const GROUP_STR: &str = "Group";
 pub(super) const TYPE_STR: &str = "Type";
 pub(super) const HIDE_FROM_REPORTS_STR: &str = "Hide from Reports";
+
+/// The fields to update in a category row. Only set values will be changed, unset values will
+/// not be changed.
+///
+/// See tiller documentation for more information about the Categories sheet:
+/// <https://help.tiller.com/en/articles/3250769-customizing-categories>
+#[derive(Debug, Default, Clone, Parser, Serialize, Deserialize, JsonSchema)]
+pub struct CategoryUpdates {
+    /// The new name for the category. Use this to rename a category. Due to `ON UPDATE CASCADE`
+    /// foreign key constraints, renaming a category automatically updates all references in
+    /// transactions and autocat rules.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub category: Option<String>,
+
+    /// The group this category belongs to. Groups organize related categories together for
+    /// reporting purposes (e.g., "Food", "Transportation", "Housing"). All categories should have
+    /// a Group assigned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub group: Option<String>,
+
+    /// The type classification for this category. Common types include "Expense", "Income", and
+    /// "Transfer". All categories should have a Type assigned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long, name = "type")]
+    pub r#type: Option<String>,
+
+    /// Controls visibility in reports. Set to "Hide" to exclude this category from reports.
+    /// This is useful for categories like credit card payments or internal transfers that you
+    /// don't want appearing in spending reports.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub hide_from_reports: Option<String>,
+
+    /// Custom columns not part of the standard Tiller schema.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[arg(long = "other-field", value_parser = utils::parse_key_val)]
+    pub other_fields: BTreeMap<String, String>,
+}

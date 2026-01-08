@@ -1,9 +1,14 @@
 //! This module is responsible for reading, writing and managing the SQLite database. The internal
 //! details of SQLite interaction are hidden while broader functions are exposed.
-
+//!
+//! TODO: This file is an absolute vibe-coding disaster. Sorry. At least try to deduplicate code.
 mod migrations;
 
 use crate::api::{AUTO_CAT, CATEGORIES, TRANSACTIONS};
+use crate::args::{
+    DeleteAutoCatsArgs, DeleteCategoriesArgs, DeleteTransactionsArgs, UpdateAutoCatsArgs,
+    UpdateCategoriesArgs, UpdateTransactionsArgs,
+};
 use crate::error::Res;
 use crate::model::{Amount, AutoCat, Category, Mapping, TillerData, Transaction};
 use anyhow::{bail, Context};
@@ -21,7 +26,18 @@ pub(crate) const CURRENT_VERSION: i32 = 1;
 
 /// Represents a row in the database in a table for which the primary key is not known in
 /// `TillerData`. Namely, rows from the `categories` and `autocats` tables.
-#[derive(Default, Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(
+    Default,
+    Debug,
+    Clone,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct _Row<T> {
     /// The primary key identifier for this row in the database.
     pub id: u64,
@@ -116,29 +132,44 @@ impl Db {
     /// Note: Foreign key constraints are temporarily disabled during this operation
     /// to allow the delete-all-then-insert pattern for categories and autocat.
     pub(crate) async fn save_tiller_data(&self, data: &TillerData) -> Res<()> {
-        // Disable foreign key constraints for bulk sync operation
-        sqlx::query("PRAGMA foreign_keys = OFF")
-            .execute(&self.pool)
+        let mut db_txn = self
+            .pool
+            .begin()
+            .await
+            .context("Unable to begin database transaction")?;
+
+        // Defer foreign key constraint checking until commit.
+        // Note: PRAGMA foreign_keys cannot be changed inside a transaction, but
+        // defer_foreign_keys CAN be set and automatically resets on commit/rollback.
+        sqlx::query("PRAGMA defer_foreign_keys = ON")
+            .execute(&mut *db_txn)
             .await?;
 
-        // Use a closure to ensure FK constraints are re-enabled even on error
-        let result = self.save_tiller_data_inner(data).await;
+        // Call inner implementation with the transaction
+        Self::save_tiller_data_inner(&mut db_txn, data).await?;
 
-        // Re-enable foreign key constraints
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&self.pool)
-            .await?;
+        // Commit - FK constraints are checked here. defer_foreign_keys auto-resets.
+        db_txn
+            .commit()
+            .await
+            .context("Unable to commit database transaction")?;
 
-        result
+        Ok(())
     }
 
     /// Inner implementation of save_tiller_data, called with FK constraints disabled.
-    async fn save_tiller_data_inner(&self, data: &TillerData) -> Res<()> {
+    ///
+    /// Takes a mutable reference to a transaction. Each query uses `&mut **tx` to create
+    /// a reborrow of the underlying connection, allowing the transaction to be reused.
+    async fn save_tiller_data_inner(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        data: &TillerData,
+    ) -> Res<()> {
         use sqlx::Row;
 
         // Get existing transaction IDs for upsert logic
         let existing_ids: Vec<String> = sqlx::query("SELECT transaction_id FROM transactions")
-            .fetch_all(&self.pool)
+            .fetch_all(&mut **tx)
             .await?
             .iter()
             .map(|row| row.get("transaction_id"))
@@ -156,7 +187,7 @@ impl Db {
             if !incoming_ids.contains(id.as_str()) {
                 sqlx::query("DELETE FROM transactions WHERE transaction_id = ?")
                     .bind(id)
-                    .execute(&self.pool)
+                    .execute(&mut **tx)
                     .await?;
             }
         }
@@ -166,121 +197,33 @@ impl Db {
             existing_ids.iter().map(|s| s.as_str()).collect();
         for transaction in data.transactions.data() {
             if existing_set.contains(transaction.transaction_id.as_str()) {
-                self.update_transaction(transaction).await?;
+                Self::update_transaction_impl(&mut **tx, transaction).await?;
             } else {
-                self._insert_transaction(transaction).await?;
+                Self::insert_transaction_impl(&mut **tx, transaction).await?;
             }
         }
 
         // Categories: delete all, then insert all
         sqlx::query("DELETE FROM categories")
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await?;
         for category in data.categories.data() {
-            self._insert_category(category).await?;
+            Self::insert_category_impl(&mut **tx, category).await?;
         }
 
         // AutoCat: delete all, then insert all
         sqlx::query("DELETE FROM autocat")
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await?;
         for autocat in data.auto_cats.data() {
-            self._insert_autocat(autocat).await?;
+            Self::insert_autocat_impl(&mut **tx, autocat).await?;
         }
 
         // Save formulas from all sheets
-        self.save_formulas(data).await?;
+        Self::save_formulas_impl(tx, data).await?;
 
         // Save sheet metadata (header mappings) for all sheets
-        self.save_sheet_metadata(data).await?;
-
-        Ok(())
-    }
-
-    /// Saves formulas from TillerData to the formulas table.
-    /// Clears existing formulas and inserts all formulas from the three sheets.
-    async fn save_formulas(&self, data: &TillerData) -> Res<()> {
-        // Clear all existing formulas
-        sqlx::query("DELETE FROM formulas")
-            .execute(&self.pool)
-            .await?;
-
-        // Save transaction formulas
-        for (row_col, formula) in data.transactions.formulas() {
-            sqlx::query("INSERT INTO formulas (sheet, row, col, formula) VALUES (?, ?, ?, ?)")
-                .bind(TRANSACTIONS)
-                .bind(row_col.0 as i64)
-                .bind(row_col.1 as i64)
-                .bind(formula)
-                .execute(&self.pool)
-                .await
-                .context("Failed to insert transaction formula")?;
-        }
-
-        // Save category formulas
-        for (row_col, formula) in data.categories.formulas() {
-            sqlx::query("INSERT INTO formulas (sheet, row, col, formula) VALUES (?, ?, ?, ?)")
-                .bind(CATEGORIES)
-                .bind(row_col.0 as i64)
-                .bind(row_col.1 as i64)
-                .bind(formula)
-                .execute(&self.pool)
-                .await
-                .context("Failed to insert category formula")?;
-        }
-
-        // Save autocat formulas
-        for (row_col, formula) in data.auto_cats.formulas() {
-            sqlx::query("INSERT INTO formulas (sheet, row, col, formula) VALUES (?, ?, ?, ?)")
-                .bind(AUTO_CAT)
-                .bind(row_col.0 as i64)
-                .bind(row_col.1 as i64)
-                .bind(formula)
-                .execute(&self.pool)
-                .await
-                .context("Failed to insert autocat formula")?;
-        }
-
-        Ok(())
-    }
-
-    /// Saves sheet metadata (header mapping) for all three sheets.
-    /// Clears existing metadata and inserts all mappings.
-    async fn save_sheet_metadata(&self, data: &TillerData) -> Res<()> {
-        // Clear all existing metadata
-        sqlx::query("DELETE FROM sheet_metadata")
-            .execute(&self.pool)
-            .await?;
-
-        // Helper to save mapping for a sheet
-        async fn save_mapping(pool: &SqlitePool, sheet: &str, mapping: &Mapping) -> Res<()> {
-            for (order, (header, column)) in mapping
-                .headers()
-                .iter()
-                .zip(mapping.columns().iter())
-                .enumerate()
-            {
-                let header_str: &str = header.as_ref();
-                let column_str: &str = column.as_ref();
-                sqlx::query(
-                    r#"INSERT INTO sheet_metadata (sheet, column_name, header_name, "order")
-                       VALUES (?, ?, ?, ?)"#,
-                )
-                .bind(sheet)
-                .bind(column_str)
-                .bind(header_str)
-                .bind(order as i64)
-                .execute(pool)
-                .await
-                .context("Failed to insert sheet metadata")?;
-            }
-            Ok(())
-        }
-
-        // Save metadata for each sheet
-        save_mapping(&self.pool, TRANSACTIONS, data.transactions.mapping()).await?;
-        save_mapping(&self.pool, CATEGORIES, data.categories.mapping()).await?;
-        save_mapping(&self.pool, AUTO_CAT, data.auto_cats.mapping()).await?;
+        Self::save_sheet_metadata_impl(tx, data).await?;
 
         Ok(())
     }
@@ -514,72 +457,67 @@ impl Db {
     }
 
     /// Inserts a new transaction into the database.
-    pub(crate) async fn _insert_transaction(&self, transaction: &Transaction) -> Res<()> {
-        let other_fields_json = if transaction.other_fields.is_empty() {
-            None
-        } else {
-            Some(serde_json::to_string(&transaction.other_fields)?)
-        };
-
-        // Convert empty category to NULL for FK constraint compatibility
-        // (uncategorized transactions have no category reference)
-        let category = if transaction.category.is_empty() {
-            None
-        } else {
-            Some(&transaction.category)
-        };
-
-        sqlx::query(
-            r#"INSERT INTO transactions (
-                transaction_id, date, description, amount, account, account_number,
-                institution, month, week, full_description, account_id, check_number,
-                date_added, merchant_name, category_hint, category, note, tags,
-                categorized_date, statement, metadata, other_fields, original_order
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
-        )
-        .bind(&transaction.transaction_id)
-        .bind(&transaction.date)
-        .bind(&transaction.description)
-        .bind(transaction.amount.value().to_f64().unwrap_or(0.0))
-        .bind(&transaction.account)
-        .bind(&transaction.account_number)
-        .bind(&transaction.institution)
-        .bind(&transaction.month)
-        .bind(&transaction.week)
-        .bind(&transaction.full_description)
-        .bind(&transaction.account_id)
-        .bind(&transaction.check_number)
-        .bind(&transaction.date_added)
-        .bind(&transaction.merchant_name)
-        .bind(&transaction.category_hint)
-        .bind(category)
-        .bind(&transaction.note)
-        .bind(&transaction.tags)
-        .bind(&transaction.categorized_date)
-        .bind(&transaction.statement)
-        .bind(&transaction.metadata)
-        .bind(&other_fields_json)
-        .bind(transaction.original_order.map(|i| i as i64))
-        .execute(&self.pool)
-        .await
-        .context("Failed to insert transaction")?;
-
-        Ok(())
+    pub(crate) async fn insert_transaction(&self, transaction: &Transaction) -> Res<()> {
+        Self::insert_transaction_impl(&self.pool, transaction).await
     }
 
-    /// Updates an existing transaction in the database.
-    pub(crate) async fn update_transaction(&self, transaction: &Transaction) -> Res<()> {
-        let other_fields_json = if transaction.other_fields.is_empty() {
+    /// Updates multiple transactions atomically.
+    ///
+    /// This operation is all-or-nothing: either all specified transactions are updated, or none
+    /// are. If any transaction ID is not found, the entire operation is rolled back.
+    pub(crate) async fn update_transactions(
+        &self,
+        args: UpdateTransactionsArgs,
+    ) -> Res<Vec<Transaction>> {
+        let mut db_txn = self
+            .pool
+            .begin()
+            .await
+            .context("Unable to begin db transaction")?;
+
+        // First pass: validate all IDs exist
+        for id in args.ids() {
+            let exists = Self::get_transaction_impl(&mut *db_txn, id).await?;
+            if exists.is_none() {
+                bail!("Transaction not found: {}", id);
+            }
+        }
+
+        // Second pass: fetch, update, and save each transaction
+        let mut results = Vec::new();
+        for id in args.ids() {
+            let mut txn = Self::get_transaction_impl(&mut *db_txn, id)
+                .await?
+                .with_context(|| format!("Transaction {id} not found"))?;
+            txn.merge_updates(args.updates().clone());
+            Self::update_transaction_impl(&mut *db_txn, &txn).await?;
+            results.push(txn);
+        }
+
+        db_txn
+            .commit()
+            .await
+            .context("Unable to commit db transaction")?;
+
+        Ok(results)
+    }
+
+    /// Updates an existing transaction using the provided executor.
+    async fn update_transaction_impl<'e, E>(executor: E, txn: &Transaction) -> Res<()>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    {
+        let other_fields_json = if txn.other_fields.is_empty() {
             None
         } else {
-            Some(serde_json::to_string(&transaction.other_fields)?)
+            Some(serde_json::to_string(&txn.other_fields)?)
         };
 
         // Convert empty category to NULL for FK constraint compatibility
-        let category = if transaction.category.is_empty() {
+        let category = if txn.category.is_empty() {
             None
         } else {
-            Some(&transaction.category)
+            Some(&txn.category)
         };
 
         sqlx::query(
@@ -591,30 +529,30 @@ impl Db {
                 metadata = ?, other_fields = ?, original_order = ?
             WHERE transaction_id = ?"#,
         )
-        .bind(&transaction.date)
-        .bind(&transaction.description)
-        .bind(transaction.amount.value().to_f64().unwrap_or(0.0))
-        .bind(&transaction.account)
-        .bind(&transaction.account_number)
-        .bind(&transaction.institution)
-        .bind(&transaction.month)
-        .bind(&transaction.week)
-        .bind(&transaction.full_description)
-        .bind(&transaction.account_id)
-        .bind(&transaction.check_number)
-        .bind(&transaction.date_added)
-        .bind(&transaction.merchant_name)
-        .bind(&transaction.category_hint)
+        .bind(&txn.date)
+        .bind(&txn.description)
+        .bind(txn.amount.value().to_f64().unwrap_or(0.0))
+        .bind(&txn.account)
+        .bind(&txn.account_number)
+        .bind(&txn.institution)
+        .bind(&txn.month)
+        .bind(&txn.week)
+        .bind(&txn.full_description)
+        .bind(&txn.account_id)
+        .bind(&txn.check_number)
+        .bind(&txn.date_added)
+        .bind(&txn.merchant_name)
+        .bind(&txn.category_hint)
         .bind(category)
-        .bind(&transaction.note)
-        .bind(&transaction.tags)
-        .bind(&transaction.categorized_date)
-        .bind(&transaction.statement)
-        .bind(&transaction.metadata)
+        .bind(&txn.note)
+        .bind(&txn.tags)
+        .bind(&txn.categorized_date)
+        .bind(&txn.statement)
+        .bind(&txn.metadata)
         .bind(&other_fields_json)
-        .bind(transaction.original_order.map(|i| i as i64))
-        .bind(&transaction.transaction_id)
-        .execute(&self.pool)
+        .bind(txn.original_order.map(|i| i as i64))
+        .bind(&txn.transaction_id)
+        .execute(executor)
         .await
         .context("Failed to update transaction")?;
 
@@ -622,7 +560,16 @@ impl Db {
     }
 
     /// Retrieves a transaction by its ID.
-    pub(crate) async fn get_transaction(&self, id: &str) -> Res<Option<Transaction>> {
+    /// Used only in tests currently; will be part of query interface later.
+    pub(crate) async fn _get_transaction(&self, id: &str) -> Res<Option<Transaction>> {
+        Self::get_transaction_impl(&self.pool, id).await
+    }
+
+    /// Retrieves a transaction by its ID using the provided executor.
+    async fn get_transaction_impl<'e, E>(executor: E, id: &str) -> Res<Option<Transaction>>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    {
         use sqlx::Row;
 
         let row = sqlx::query(
@@ -634,7 +581,7 @@ impl Db {
             FROM transactions WHERE transaction_id = ?"#,
         )
         .bind(id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(executor)
         .await
         .context("Failed to get transaction")?;
 
@@ -694,43 +641,74 @@ impl Db {
     }
 
     /// Inserts a new category into the database. Returns the category name (primary key).
-    pub(crate) async fn _insert_category(&self, category: &Category) -> Res<String> {
-        let other_fields_json = if category.other_fields.is_empty() {
-            None
-        } else {
-            Some(serde_json::to_string(&category.other_fields)?)
-        };
-
-        sqlx::query(
-            r#"INSERT INTO categories (category, category_group, type, hide_from_reports, other_fields, original_order)
-            VALUES (?, ?, ?, ?, ?, ?)"#,
-        )
-        .bind(&category.category)
-        .bind(&category.category_group)
-        .bind(&category.r#type)
-        .bind(&category.hide_from_reports)
-        .bind(&other_fields_json)
-        .bind(category.original_order.map(|i| i as i64))
-        .execute(&self.pool)
-        .await
-        .context("Failed to insert category")?;
-
+    pub(crate) async fn insert_category(&self, category: &Category) -> Res<String> {
+        Self::insert_category_impl(&self.pool, category).await?;
         Ok(category.category.clone())
     }
 
-    /// Updates an existing category in the database.
+    /// Updates one or more categories atomically.
     ///
-    /// The `old_name` parameter is used to find the existing category.
-    /// If `new_data.category` differs from `old_name`, the category is renamed.
-    /// Due to `ON UPDATE CASCADE` foreign key constraints, renaming a category
-    /// automatically updates all references in transactions and autocat.
+    /// This operation is all-or-nothing: either all specified categories are updated, or none
+    /// are. If any category is not found, the entire operation is rolled back.
     ///
-    /// Returns the new category name.
-    pub(crate) async fn _update_category(
-        &self,
+    /// Due to `ON UPDATE CASCADE` foreign key constraints, renaming a category automatically
+    /// updates all references in transactions and autocat.
+    pub(crate) async fn update_categories(&self, args: UpdateCategoriesArgs) -> Res<Vec<Category>> {
+        let mut db_txn = self
+            .pool
+            .begin()
+            .await
+            .context("Unable to begin db transaction")?;
+
+        // First pass: validate all names exist
+        for name in args.names() {
+            let exists = Self::get_category_impl(&mut *db_txn, name).await?;
+            if exists.is_none() {
+                bail!("Category not found: {}", name);
+            }
+        }
+
+        // Second pass: fetch, update, and save each category
+        let mut results = Vec::new();
+        for name in args.names() {
+            let mut category = Self::get_category_impl(&mut *db_txn, name)
+                .await?
+                .with_context(|| format!("Category '{name}' not found"))?;
+
+            // Track original name for update (in case of rename)
+            let old_name = category.category.clone();
+
+            category.merge_updates(args.updates().clone());
+
+            Self::update_category_impl(&mut *db_txn, &old_name, &category).await?;
+
+            // Re-fetch to get the updated category (especially if renamed)
+            let updated = Self::get_category_impl(&mut *db_txn, &category.category)
+                .await?
+                .with_context(|| {
+                    format!("Category '{}' not found after update", category.category)
+                })?;
+
+            results.push(updated);
+        }
+
+        db_txn
+            .commit()
+            .await
+            .context("Unable to commit db transaction")?;
+
+        Ok(results)
+    }
+
+    /// Updates a category using the provided executor.
+    async fn update_category_impl<'e, E>(
+        executor: E,
         old_name: &str,
         new_data: &Category,
-    ) -> Res<String> {
+    ) -> Res<()>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    {
         let other_fields_json = if new_data.other_fields.is_empty() {
             None
         } else {
@@ -748,7 +726,7 @@ impl Db {
         .bind(&new_data.hide_from_reports)
         .bind(&other_fields_json)
         .bind(old_name)
-        .execute(&self.pool)
+        .execute(executor)
         .await
         .context("Failed to update category")?;
 
@@ -756,11 +734,19 @@ impl Db {
             bail!("Category '{}' not found", old_name);
         }
 
-        Ok(new_data.category.clone())
+        Ok(())
     }
 
     /// Retrieves a category by its name (primary key).
     pub(crate) async fn _get_category(&self, name: &str) -> Res<Option<Category>> {
+        Self::get_category_impl(&self.pool, name).await
+    }
+
+    /// Retrieves a category by name using the provided executor.
+    async fn get_category_impl<'e, E>(executor: E, name: &str) -> Res<Option<Category>>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    {
         use sqlx::Row;
 
         let row = sqlx::query(
@@ -768,7 +754,7 @@ impl Db {
             FROM categories WHERE category = ?"#,
         )
         .bind(name)
-        .fetch_optional(&self.pool)
+        .fetch_optional(executor)
         .await
         .context("Failed to get category")?;
 
@@ -797,67 +783,102 @@ impl Db {
         }
     }
 
-    /// Inserts a new autocat rule into the database. Returns the primary key ID.
-    pub(crate) async fn _insert_autocat(&self, autocat: &AutoCat) -> Res<u64> {
-        let other_fields_json = if autocat.other_fields.is_empty() {
-            None
-        } else {
-            Some(serde_json::to_string(&autocat.other_fields)?)
-        };
+    /// Deletes multiple categories atomically.
+    ///
+    /// This operation is all-or-nothing: either all specified categories are deleted, or none
+    /// are. If any category is not found, the entire operation is rolled back.
+    ///
+    /// This will fail with a foreign key constraint error if any transactions or autocat rules
+    /// reference a category. Those references must be updated or removed first.
+    pub(crate) async fn delete_categories(&self, args: DeleteCategoriesArgs) -> Res<Vec<String>> {
+        let mut db_txn = self
+            .pool
+            .begin()
+            .await
+            .context("Unable to begin db transaction")?;
 
-        // Convert empty category to NULL for FK constraint compatibility
-        let category = if autocat.category.is_empty() {
-            None
-        } else {
-            Some(&autocat.category)
-        };
+        // Delete each category and verify it existed
+        let mut deleted = Vec::new();
+        for name in args.names() {
+            let result = sqlx::query("DELETE FROM categories WHERE category = ?")
+                .bind(name)
+                .execute(&mut *db_txn)
+                .await
+                .context("Failed to delete category")?;
 
-        let result = sqlx::query(
-            r#"INSERT INTO autocat (
-                category, description, description_contains, account_contains,
-                institution_contains, amount_min, amount_max, amount_equals,
-                description_equals, description_full, full_description_contains,
-                amount_contains, other_fields, original_order
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
-        )
-        .bind(category)
-        .bind(&autocat.description)
-        .bind(&autocat.description_contains)
-        .bind(&autocat.account_contains)
-        .bind(&autocat.institution_contains)
-        .bind(
-            autocat
-                .amount_min
-                .as_ref()
-                .map(|a| a.value().to_f64().unwrap_or(0.0)),
-        )
-        .bind(
-            autocat
-                .amount_max
-                .as_ref()
-                .map(|a| a.value().to_f64().unwrap_or(0.0)),
-        )
-        .bind(
-            autocat
-                .amount_equals
-                .as_ref()
-                .map(|a| a.value().to_f64().unwrap_or(0.0)),
-        )
-        .bind(&autocat.description_equals)
-        .bind(&autocat.description_full)
-        .bind(&autocat.full_description_contains)
-        .bind(&autocat.amount_contains)
-        .bind(&other_fields_json)
-        .bind(autocat.original_order.map(|i| i as i64))
-        .execute(&self.pool)
-        .await
-        .context("Failed to insert autocat")?;
+            if result.rows_affected() == 0 {
+                bail!("Category not found: {}", name);
+            }
+            deleted.push(name.to_string());
+        }
 
-        Ok(result.last_insert_rowid() as u64)
+        db_txn
+            .commit()
+            .await
+            .context("Unable to commit db transaction")?;
+
+        Ok(deleted)
     }
 
-    /// Updates an existing autocat rule in the database. Returns the primary key ID.
-    pub(crate) async fn _update_autocat(&self, autocat: &_Row<AutoCat>) -> Res<u64> {
+    /// Inserts a new autocat rule into the database. Returns the primary key ID.
+    pub(crate) async fn insert_autocat(&self, autocat: &AutoCat) -> Res<u64> {
+        Self::insert_autocat_impl(&self.pool, autocat).await
+    }
+
+    /// Updates one or more autocat rules atomically.
+    ///
+    /// This operation is all-or-nothing: either all specified rules are updated, or none
+    /// are. If any rule ID is not found, the entire operation is rolled back.
+    pub(crate) async fn update_autocats(
+        &self,
+        args: UpdateAutoCatsArgs,
+    ) -> Res<Vec<_Row<AutoCat>>> {
+        let mut db_txn = self
+            .pool
+            .begin()
+            .await
+            .context("Unable to begin db transaction")?;
+
+        // First pass: validate all IDs exist
+        for id in args.ids() {
+            let exists = Self::get_autocat_impl(&mut *db_txn, id).await?;
+            if exists.is_none() {
+                bail!("AutoCat rule not found: {}", id);
+            }
+        }
+
+        // Second pass: fetch, update, and save each autocat
+        let mut results = Vec::new();
+        for id in args.ids() {
+            let mut autocat = Self::get_autocat_impl(&mut *db_txn, id)
+                .await?
+                .with_context(|| format!("AutoCat rule '{id}' not found"))?;
+
+            autocat.row.merge_updates(args.updates().clone());
+
+            Self::update_autocat_impl(&mut *db_txn, &autocat).await?;
+
+            // Re-fetch to get the updated autocat
+            let updated = Self::get_autocat_impl(&mut *db_txn, id)
+                .await?
+                .with_context(|| format!("AutoCat rule '{}' not found after update", id))?;
+
+            results.push(updated);
+        }
+
+        db_txn
+            .commit()
+            .await
+            .context("Unable to commit db transaction")?;
+
+        Ok(results)
+    }
+
+    /// Updates an autocat rule using the provided executor.
+    async fn update_autocat_impl<'e, E>(executor: E, autocat: &_Row<AutoCat>) -> Res<()>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    {
         let other_fields_json = if autocat.row.other_fields.is_empty() {
             None
         } else {
@@ -911,15 +932,23 @@ impl Db {
         .bind(&autocat.row.amount_contains)
         .bind(&other_fields_json)
         .bind(autocat.id as i64)
-        .execute(&self.pool)
+        .execute(executor)
         .await
         .context("Failed to update autocat")?;
 
-        Ok(autocat.id)
+        Ok(())
     }
 
     /// Retrieves an autocat rule by its ID.
     pub(crate) async fn _get_autocat(&self, id: &str) -> Res<Option<_Row<AutoCat>>> {
+        Self::get_autocat_impl(&self.pool, id).await
+    }
+
+    /// Retrieves an autocat rule by ID using the provided executor.
+    async fn get_autocat_impl<'e, E>(executor: E, id: &str) -> Res<Option<_Row<AutoCat>>>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    {
         use sqlx::Row;
 
         let id_num: i64 = id.parse().context("Invalid autocat ID")?;
@@ -932,7 +961,7 @@ impl Db {
             FROM autocat WHERE id = ?"#,
         )
         .bind(id_num)
-        .fetch_optional(&self.pool)
+        .fetch_optional(executor)
         .await
         .context("Failed to get autocat")?;
 
@@ -988,10 +1017,40 @@ impl Db {
         }
     }
 
-    // /// Returns a reference to the underlying connection pool.
-    // fn pool(&self) -> &SqlitePool {
-    //     &self.pool
-    // }
+    /// Deletes multiple autocat rules atomically.
+    ///
+    /// This operation is all-or-nothing: either all specified rules are deleted, or none
+    /// are. If any rule ID is not found, the entire operation is rolled back.
+    pub(crate) async fn delete_autocats(&self, args: DeleteAutoCatsArgs) -> Res<Vec<String>> {
+        let mut db_txn = self
+            .pool
+            .begin()
+            .await
+            .context("Unable to begin db transaction")?;
+
+        // Delete each autocat and verify it existed
+        let mut deleted = Vec::new();
+        for id in args.ids() {
+            let id_num: i64 = id.parse().context("Invalid autocat ID")?;
+            let result = sqlx::query("DELETE FROM autocat WHERE id = ?")
+                .bind(id_num)
+                .execute(&mut *db_txn)
+                .await
+                .context("Failed to delete autocat")?;
+
+            if result.rows_affected() == 0 {
+                bail!("AutoCat rule not found: {}", id);
+            }
+            deleted.push(id.to_string());
+        }
+
+        db_txn
+            .commit()
+            .await
+            .context("Unable to commit db transaction")?;
+
+        Ok(deleted)
+    }
 
     /// Creates the schema_version table and inserts version 0. This establishes the invariant
     /// that schema_version always exists, allowing migration logic to work uniformly.
@@ -1028,13 +1087,278 @@ impl Db {
         migrations::run(&self.pool, current, CURRENT_VERSION).await
     }
 
-    /// Deletes a transaction by its ID. Used for testing gap detection.
-    pub(crate) async fn _delete_transaction(&self, transaction_id: &str) -> Res<()> {
-        sqlx::query("DELETE FROM transactions WHERE transaction_id = ?")
-            .bind(transaction_id)
-            .execute(&self.pool)
+    /// Deletes multiple transactions atomically.
+    ///
+    /// This operation is all-or-nothing: either all specified transactions are deleted, or none
+    /// are. If any transaction ID is not found, the entire operation is rolled back.
+    pub(crate) async fn delete_transactions(
+        &self,
+        args: DeleteTransactionsArgs,
+    ) -> Res<Vec<String>> {
+        let mut db_txn = self
+            .pool
+            .begin()
             .await
-            .context("Failed to delete transaction")?;
+            .context("Unable to begin db transaction")?;
+
+        let mut deleted = Vec::new();
+        for id in args.ids() {
+            let result = sqlx::query("DELETE FROM transactions WHERE transaction_id = ?")
+                .bind(id)
+                .execute(&mut *db_txn)
+                .await
+                .context("Failed to delete transaction")?;
+
+            if result.rows_affected() == 0 {
+                bail!("Transaction not found: {}", id);
+            }
+            deleted.push(id.to_string());
+        }
+
+        db_txn
+            .commit()
+            .await
+            .context("Unable to commit db transaction")?;
+
+        Ok(deleted)
+    }
+
+    async fn insert_transaction_impl<'e, E>(ex: E, txn: &Transaction) -> Res<()>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    {
+        let other_fields_json = if txn.other_fields.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&txn.other_fields)?)
+        };
+
+        // Convert empty category to NULL for FK constraint compatibility
+        let category = if txn.category.is_empty() {
+            None
+        } else {
+            Some(&txn.category)
+        };
+
+        sqlx::query(
+            r#"INSERT INTO transactions (
+                transaction_id, date, description, amount, account, account_number,
+                institution, month, week, full_description, account_id, check_number,
+                date_added, merchant_name, category_hint, category, note, tags,
+                categorized_date, statement, metadata, other_fields, original_order
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+        )
+        .bind(&txn.transaction_id)
+        .bind(&txn.date)
+        .bind(&txn.description)
+        .bind(txn.amount.value().to_f64().unwrap_or(0.0))
+        .bind(&txn.account)
+        .bind(&txn.account_number)
+        .bind(&txn.institution)
+        .bind(&txn.month)
+        .bind(&txn.week)
+        .bind(&txn.full_description)
+        .bind(&txn.account_id)
+        .bind(&txn.check_number)
+        .bind(&txn.date_added)
+        .bind(&txn.merchant_name)
+        .bind(&txn.category_hint)
+        .bind(category)
+        .bind(&txn.note)
+        .bind(&txn.tags)
+        .bind(&txn.categorized_date)
+        .bind(&txn.statement)
+        .bind(&txn.metadata)
+        .bind(&other_fields_json)
+        .bind(txn.original_order.map(|i| i as i64))
+        .execute(ex)
+        .await
+        .context("Failed to insert transaction")?;
+
+        Ok(())
+    }
+
+    async fn insert_category_impl<'e, E>(ex: E, category: &Category) -> Res<()>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    {
+        let other_fields_json = if category.other_fields.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&category.other_fields)?)
+        };
+
+        sqlx::query(
+            r#"INSERT INTO categories (category, category_group, type, hide_from_reports, other_fields, original_order)
+            VALUES (?, ?, ?, ?, ?, ?)"#,
+        )
+        .bind(&category.category)
+        .bind(&category.category_group)
+        .bind(&category.r#type)
+        .bind(&category.hide_from_reports)
+        .bind(&other_fields_json)
+        .bind(category.original_order.map(|i| i as i64))
+        .execute(ex)
+        .await
+        .context("Failed to insert category")?;
+
+        Ok(())
+    }
+
+    async fn insert_autocat_impl<'e, E>(ex: E, autocat: &AutoCat) -> Res<u64>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    {
+        let other_fields_json = if autocat.other_fields.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&autocat.other_fields)?)
+        };
+
+        // Convert empty category to NULL for FK constraint compatibility
+        let category = if autocat.category.is_empty() {
+            None
+        } else {
+            Some(&autocat.category)
+        };
+
+        let result = sqlx::query(
+            r#"INSERT INTO autocat (
+                category, description, description_contains, account_contains,
+                institution_contains, amount_min, amount_max, amount_equals,
+                description_equals, description_full, full_description_contains,
+                amount_contains, other_fields, original_order
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+        )
+        .bind(category)
+        .bind(&autocat.description)
+        .bind(&autocat.description_contains)
+        .bind(&autocat.account_contains)
+        .bind(&autocat.institution_contains)
+        .bind(
+            autocat
+                .amount_min
+                .as_ref()
+                .map(|a| a.value().to_f64().unwrap_or(0.0)),
+        )
+        .bind(
+            autocat
+                .amount_max
+                .as_ref()
+                .map(|a| a.value().to_f64().unwrap_or(0.0)),
+        )
+        .bind(
+            autocat
+                .amount_equals
+                .as_ref()
+                .map(|a| a.value().to_f64().unwrap_or(0.0)),
+        )
+        .bind(&autocat.description_equals)
+        .bind(&autocat.description_full)
+        .bind(&autocat.full_description_contains)
+        .bind(&autocat.amount_contains)
+        .bind(&other_fields_json)
+        .bind(autocat.original_order.map(|i| i as i64))
+        .execute(ex)
+        .await
+        .context("Failed to insert autocat")?;
+
+        Ok(result.last_insert_rowid() as u64)
+    }
+
+    /// Saves formulas using the provided transaction.
+    async fn save_formulas_impl(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        data: &TillerData,
+    ) -> Res<()> {
+        // Clear all existing formulas
+        sqlx::query("DELETE FROM formulas")
+            .execute(&mut **tx)
+            .await?;
+
+        // Save transaction formulas
+        for (row_col, formula) in data.transactions.formulas() {
+            sqlx::query("INSERT INTO formulas (sheet, row, col, formula) VALUES (?, ?, ?, ?)")
+                .bind(TRANSACTIONS)
+                .bind(row_col.0 as i64)
+                .bind(row_col.1 as i64)
+                .bind(formula)
+                .execute(&mut **tx)
+                .await
+                .context("Failed to insert transaction formula")?;
+        }
+
+        // Save category formulas
+        for (row_col, formula) in data.categories.formulas() {
+            sqlx::query("INSERT INTO formulas (sheet, row, col, formula) VALUES (?, ?, ?, ?)")
+                .bind(CATEGORIES)
+                .bind(row_col.0 as i64)
+                .bind(row_col.1 as i64)
+                .bind(formula)
+                .execute(&mut **tx)
+                .await
+                .context("Failed to insert category formula")?;
+        }
+
+        // Save autocat formulas
+        for (row_col, formula) in data.auto_cats.formulas() {
+            sqlx::query("INSERT INTO formulas (sheet, row, col, formula) VALUES (?, ?, ?, ?)")
+                .bind(AUTO_CAT)
+                .bind(row_col.0 as i64)
+                .bind(row_col.1 as i64)
+                .bind(formula)
+                .execute(&mut **tx)
+                .await
+                .context("Failed to insert autocat formula")?;
+        }
+
+        Ok(())
+    }
+
+    /// Saves sheet metadata using the provided transaction.
+    async fn save_sheet_metadata_impl(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        data: &TillerData,
+    ) -> Res<()> {
+        // Clear all existing metadata
+        sqlx::query("DELETE FROM sheet_metadata")
+            .execute(&mut **tx)
+            .await?;
+
+        // Helper to save mapping for a sheet
+        async fn save_mapping(
+            tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+            sheet: &str,
+            mapping: &Mapping,
+        ) -> Res<()> {
+            for (order, (header, column)) in mapping
+                .headers()
+                .iter()
+                .zip(mapping.columns().iter())
+                .enumerate()
+            {
+                let header_str: &str = header.as_ref();
+                let column_str: &str = column.as_ref();
+                sqlx::query(
+                    r#"INSERT INTO sheet_metadata (sheet, column_name, header_name, "order")
+                       VALUES (?, ?, ?, ?)"#,
+                )
+                .bind(sheet)
+                .bind(column_str)
+                .bind(header_str)
+                .bind(order as i64)
+                .execute(&mut **tx)
+                .await
+                .context("Failed to insert sheet metadata")?;
+            }
+            Ok(())
+        }
+
+        // Save metadata for each sheet
+        save_mapping(tx, TRANSACTIONS, data.transactions.mapping()).await?;
+        save_mapping(tx, CATEGORIES, data.categories.mapping()).await?;
+        save_mapping(tx, AUTO_CAT, data.auto_cats.mapping()).await?;
+
         Ok(())
     }
 }
@@ -1206,7 +1530,7 @@ mod tests {
         transaction.institution = "Test Bank".to_string();
         transaction.account_id = "acct-001".to_string();
 
-        db._insert_transaction(&transaction).await.unwrap();
+        db.insert_transaction(&transaction).await.unwrap();
 
         // Verify by querying directly
         let row: (String,) = sqlx::query_as(
@@ -1243,7 +1567,9 @@ mod tests {
         transaction.institution = "Test Bank".to_string();
         transaction.account_id = "acct-001".to_string();
 
-        db.update_transaction(&transaction).await.unwrap();
+        Db::update_transaction_impl(&db.pool, &transaction)
+            .await
+            .unwrap();
 
         // Verify the update
         let row: (String,) =
@@ -1269,7 +1595,7 @@ mod tests {
         .await
         .unwrap();
 
-        let transaction = db.get_transaction("txn-001").await.unwrap();
+        let transaction = db._get_transaction("txn-001").await.unwrap();
 
         assert!(transaction.is_some());
         let transaction = transaction.unwrap();
@@ -1289,7 +1615,7 @@ mod tests {
         category.r#type = "Expense".to_string();
         category.hide_from_reports = "".to_string();
 
-        let name = db._insert_category(&category).await.unwrap();
+        let name = db.insert_category(&category).await.unwrap();
         assert_eq!(name, "Groceries");
 
         // Verify by querying directly
@@ -1319,13 +1645,13 @@ mod tests {
         .unwrap();
 
         // Update via the method (renaming from "Groceries" to "Updated Groceries")
-        let mut new_data = Category::default();
-        new_data.category = "Updated Groceries".to_string();
-        new_data.category_group = "Updated Food".to_string();
-        new_data.r#type = "Expense".to_string();
-        new_data.hide_from_reports = "".to_string();
-
-        db._update_category("Groceries", &new_data).await.unwrap();
+        let updates = crate::model::CategoryUpdates {
+            category: Some("Updated Groceries".to_string()),
+            group: Some("Updated Food".to_string()),
+            ..Default::default()
+        };
+        let args = crate::args::UpdateCategoriesArgs::new(vec!["Groceries"], updates).unwrap();
+        db.update_categories(args).await.unwrap();
 
         // Verify the update by querying with the new name
         let (name, group): (String, String) =
@@ -1387,7 +1713,7 @@ mod tests {
         autocat.category = "Groceries".to_string();
         autocat.description_contains = "grocery".to_string();
 
-        let id = db._insert_autocat(&autocat).await.unwrap();
+        let id = db.insert_autocat(&autocat).await.unwrap();
 
         // Verify by querying directly
         let row: (String, String) =
@@ -1432,16 +1758,13 @@ mod tests {
             .unwrap();
 
         // Update via the method (changing category from Groceries to Updated Groceries)
-        let mut autocat = AutoCat::default();
-        autocat.category = "Updated Groceries".to_string();
-        autocat.description_contains = "updated grocery".to_string();
-
-        let row = _Row {
-            id: id as u64,
-            row: autocat,
+        let updates = crate::model::AutoCatUpdates {
+            category: Some("Updated Groceries".to_string()),
+            description_contains: Some("updated grocery".to_string()),
+            ..Default::default()
         };
-
-        db._update_autocat(&row).await.unwrap();
+        let args = crate::args::UpdateAutoCatsArgs::new(vec![id.to_string()], updates).unwrap();
+        db.update_autocats(args).await.unwrap();
 
         // Verify the update
         let (category, desc): (String, String) =
@@ -1498,7 +1821,7 @@ mod tests {
         let db_path = temp_dir.path().join("test.sqlite");
         let db = Db::init(&db_path).await.unwrap();
 
-        let result = db.get_transaction("non-existent-id").await.unwrap();
+        let result = db._get_transaction("non-existent-id").await.unwrap();
         assert!(result.is_none());
     }
 
@@ -1541,10 +1864,10 @@ mod tests {
             .other_fields
             .insert("Custom Column".to_string(), "custom value".to_string());
 
-        db._insert_transaction(&transaction).await.unwrap();
+        db.insert_transaction(&transaction).await.unwrap();
 
         // Retrieve and verify other_fields was stored
-        let retrieved = db.get_transaction("txn-other").await.unwrap().unwrap();
+        let retrieved = db._get_transaction("txn-other").await.unwrap().unwrap();
         assert_eq!(
             retrieved.other_fields.get("Custom Column"),
             Some(&"custom value".to_string())
@@ -1563,7 +1886,7 @@ mod tests {
             .other_fields
             .insert("Extra Field".to_string(), "extra value".to_string());
 
-        let name = db._insert_category(&category).await.unwrap();
+        let name = db.insert_category(&category).await.unwrap();
         assert_eq!(name, "Test Category");
 
         // Retrieve and verify other_fields was stored
@@ -1592,11 +1915,11 @@ mod tests {
         transaction.institution = "Test Bank".to_string();
         transaction.account_id = "acct-001".to_string();
 
-        db._insert_transaction(&transaction).await.unwrap();
+        db.insert_transaction(&transaction).await.unwrap();
 
         // Try to insert duplicate - should fail
         transaction.description = "Second".to_string();
-        let result = db._insert_transaction(&transaction).await;
+        let result = db.insert_transaction(&transaction).await;
         assert!(result.is_err());
     }
 
@@ -1609,10 +1932,10 @@ mod tests {
         let mut category = Category::default();
         category.category = "Duplicate".to_string();
 
-        db._insert_category(&category).await.unwrap();
+        db.insert_category(&category).await.unwrap();
 
         // Try to insert duplicate - should fail due to UNIQUE constraint
-        let result = db._insert_category(&category).await;
+        let result = db.insert_category(&category).await;
         assert!(result.is_err());
     }
 
@@ -1624,58 +1947,7 @@ mod tests {
 
         // Create TillerData with formulas in "Custom Column"
         // The formula data differs from value data to trigger formula detection
-        let transactions = Transactions::parse(
-            vec![
-                vec![
-                    "Transaction ID",
-                    "Date",
-                    "Description",
-                    "Amount",
-                    "Account",
-                    "Account #",
-                    "Institution",
-                    "Account ID",
-                    "Custom Column",
-                ],
-                vec![
-                    "txn-001",
-                    "2025-01-15",
-                    "Coffee Shop",
-                    "-4.50",
-                    "Checking",
-                    "1234",
-                    "Test Bank",
-                    "acct-001",
-                    "4.50", // This is the computed value
-                ],
-            ],
-            // Formula data: same as values except Custom Column has a formula
-            vec![
-                vec![
-                    "Transaction ID",
-                    "Date",
-                    "Description",
-                    "Amount",
-                    "Account",
-                    "Account #",
-                    "Institution",
-                    "Account ID",
-                    "Custom Column",
-                ],
-                vec![
-                    "txn-001",
-                    "2025-01-15",
-                    "Coffee Shop",
-                    "-4.50",
-                    "Checking",
-                    "1234",
-                    "Test Bank",
-                    "acct-001",
-                    "=ABS(D2)", // This is the formula
-                ],
-            ],
-        )
-        .unwrap();
+        let transactions = create_transactions_with_formulas();
 
         // Verify the transactions object detected the formula
         assert!(
@@ -1739,6 +2011,61 @@ mod tests {
         );
     }
 
+    fn create_transactions_with_formulas() -> Transactions {
+        Transactions::parse(
+            vec![
+                vec![
+                    "Transaction ID",
+                    "Date",
+                    "Description",
+                    "Amount",
+                    "Account",
+                    "Account #",
+                    "Institution",
+                    "Account ID",
+                    "Custom Column",
+                ],
+                vec![
+                    "txn-001",
+                    "2025-01-15",
+                    "Coffee Shop",
+                    "-4.50",
+                    "Checking",
+                    "1234",
+                    "Test Bank",
+                    "acct-001",
+                    "4.50", // This is the computed value
+                ],
+            ],
+            // Formula data: same as values except Custom Column has a formula
+            vec![
+                vec![
+                    "Transaction ID",
+                    "Date",
+                    "Description",
+                    "Amount",
+                    "Account",
+                    "Account #",
+                    "Institution",
+                    "Account ID",
+                    "Custom Column",
+                ],
+                vec![
+                    "txn-001",
+                    "2025-01-15",
+                    "Coffee Shop",
+                    "-4.50",
+                    "Checking",
+                    "1234",
+                    "Test Bank",
+                    "acct-001",
+                    "=ABS(D2)", // This is the formula
+                ],
+            ],
+        )
+        .unwrap()
+    }
+
     #[tokio::test]
     async fn test_get_tiller_data_loads_formulas() {
         let temp_dir = TempDir::new().unwrap();
@@ -1746,57 +2073,7 @@ mod tests {
         let db = Db::init(&db_path).await.unwrap();
 
         // Create TillerData with formulas in "Custom Column"
-        let transactions = Transactions::parse(
-            vec![
-                vec![
-                    "Transaction ID",
-                    "Date",
-                    "Description",
-                    "Amount",
-                    "Account",
-                    "Account #",
-                    "Institution",
-                    "Account ID",
-                    "Custom Column",
-                ],
-                vec![
-                    "txn-001",
-                    "2025-01-15",
-                    "Coffee Shop",
-                    "-4.50",
-                    "Checking",
-                    "1234",
-                    "Test Bank",
-                    "acct-001",
-                    "4.50",
-                ],
-            ],
-            vec![
-                vec![
-                    "Transaction ID",
-                    "Date",
-                    "Description",
-                    "Amount",
-                    "Account",
-                    "Account #",
-                    "Institution",
-                    "Account ID",
-                    "Custom Column",
-                ],
-                vec![
-                    "txn-001",
-                    "2025-01-15",
-                    "Coffee Shop",
-                    "-4.50",
-                    "Checking",
-                    "1234",
-                    "Test Bank",
-                    "acct-001",
-                    "=ABS(D2)",
-                ],
-            ],
-        )
-        .unwrap();
+        let transactions = create_transactions_with_formulas();
 
         // Verify the transactions object detected the formula
         assert!(

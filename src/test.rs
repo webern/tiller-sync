@@ -124,4 +124,105 @@ impl TestEnv {
 
         self.config.db().save_tiller_data(&data).await.unwrap();
     }
+
+    /// Inserts test AutoCat data into the database.
+    ///
+    /// Creates AutoCat rules along with the categories needed to satisfy foreign key constraints.
+    /// The AutoCat rules get synthetic IDs (1, 2, etc.) assigned by the database.
+    pub async fn insert_test_autocat_data(&self) {
+        let transactions = Transactions::parse(
+            vec![vec![
+                "Transaction ID",
+                "Date",
+                "Description",
+                "Amount",
+                "Account",
+                "Account #",
+                "Institution",
+                "Account ID",
+                "Category",
+                "Note",
+            ]],
+            Vec::<Vec<&str>>::new(),
+        )
+        .unwrap();
+
+        let categories = Categories::parse(
+            vec![
+                vec!["Category", "Group", "Type", "Hide From Reports"],
+                vec!["Food", "Living", "Expense", ""],
+                vec!["Entertainment", "Fun", "Expense", ""],
+                vec!["Transportation", "Living", "Expense", ""],
+            ],
+            Vec::<Vec<&str>>::new(),
+        )
+        .unwrap();
+
+        let auto_cats = AutoCats::parse(
+            vec![
+                vec![
+                    "Category",
+                    "Description Contains",
+                    "Account Contains",
+                    "Amount Min",
+                ],
+                vec!["Food", "starbucks,coffee", "", ""],
+                vec!["Entertainment", "netflix", "", "10.00"],
+            ],
+            Vec::<Vec<&str>>::new(),
+        )
+        .unwrap();
+
+        let data = TillerData {
+            transactions,
+            categories,
+            auto_cats,
+        };
+
+        self.config.db().save_tiller_data(&data).await.unwrap();
+    }
+
+    /// Inserts standalone categories into the database without any transactions or autocat rules.
+    ///
+    /// This is useful for testing category deletion where no foreign key references exist.
+    pub async fn insert_standalone_categories(&self, category_names: &[&str]) {
+        let transactions = Transactions::parse(
+            vec![vec![
+                "Transaction ID",
+                "Date",
+                "Description",
+                "Amount",
+                "Account",
+                "Account #",
+                "Institution",
+                "Account ID",
+                "Category",
+                "Note",
+            ]],
+            Vec::<Vec<&str>>::new(),
+        )
+        .unwrap();
+
+        let mut category_rows: Vec<Vec<&str>> =
+            vec![vec!["Category", "Group", "Type", "Hide From Reports"]];
+        for name in category_names {
+            category_rows.push(vec![name, "Test Group", "Expense", ""]);
+        }
+
+        let categories = Categories::parse(category_rows, Vec::<Vec<&str>>::new()).unwrap();
+
+        let auto_cats = AutoCats::parse(
+            vec![vec!["Category", "Description Contains"]],
+            Vec::<Vec<&str>>::new(),
+        )
+        .unwrap();
+
+        let data = TillerData {
+            transactions,
+            categories,
+            auto_cats,
+        };
+
+        self.config.db().save_tiller_data(&data).await.unwrap();
+    }
 }

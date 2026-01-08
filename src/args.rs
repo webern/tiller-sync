@@ -2,12 +2,14 @@
 
 use crate::commands::FormulasMode;
 use crate::error::{ErrorType, IntoResult};
-use crate::model::TransactionUpdates;
+use crate::model::{Amount, AutoCatUpdates, CategoryUpdates, TransactionUpdates};
+use crate::utils;
 use crate::Result;
 use anyhow::anyhow;
 use clap::{Parser, Subcommand};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
@@ -80,6 +82,10 @@ pub enum Command {
     Mcp(McpArgs),
     /// Update a transaction, category, or autocat rule in the local database.
     Update(Box<UpdateArgs>),
+    /// Delete a transaction, category, or autocat rule from the local database.
+    Delete(DeleteArgs),
+    /// Insert a new transaction, category, or autocat rule into the local database.
+    Insert(Box<InsertArgs>),
 }
 
 /// Arguments common to all subcommands.
@@ -253,15 +259,36 @@ impl UpdateArgs {
 /// Subcommands for `tiller update`.
 #[derive(Subcommand, Debug, Clone)]
 pub enum UpdateSubcommand {
-    /// Update one or more transactions by ID.
-    Transactions(UpdateTransactionsArgs),
+    /// Updates one or more transactions in the local SQLite database by their IDs. At least one
+    /// transaction ID must be provided. When more than one ID is provided, all specified
+    /// transactions are updated with the same field values.
+    ///
+    /// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
+    Transactions(Box<UpdateTransactionsArgs>),
+
+    /// Updates one or more categories in the local SQLite database by their names. At least one
+    /// category name must be provided. When more than one name is provided, all specified
+    /// categories are updated with the same field values.
+    ///
+    /// Due to `ON UPDATE CASCADE` foreign key constraints, renaming a category automatically
+    /// updates all references in transactions and autocat rules.
+    ///
+    /// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
+    Categories(UpdateCategoriesArgs),
+
+    /// Updates one or more AutoCat rules in the local SQLite database by their IDs. At least one
+    /// ID must be provided. When more than one ID is provided, all specified rules are updated
+    /// with the same field values.
+    ///
+    /// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
+    Autocats(UpdateAutoCatsArgs),
 }
 
 /// Args for the `tiller update transactions` command.
 ///
 /// Updates one or more transactions in the local SQLite database by their IDs. At least one
-/// transaction ID must be provided. When more than one ID is provided, all specified transactions
-/// are updated with the same field values.
+/// transaction ID must be provided. When more than one ID is provided, all specified
+/// transactions are updated with the same field values.
 ///
 /// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
 #[derive(Debug, Parser, Clone, Serialize, Deserialize, JsonSchema)]
@@ -297,6 +324,566 @@ impl UpdateTransactionsArgs {
     pub fn updates(&self) -> &TransactionUpdates {
         &self.updates
     }
+}
+
+/// Args for the `tiller update categories` command.
+///
+/// Updates one or more categories in the local SQLite database by their names. At least one
+/// category name must be provided. When more than one name is provided, all specified
+/// categories are updated with the same field values.
+///
+/// The category name is the primary key. To rename a category, provide a single name and set
+/// the `--category` update field to the new name.
+///
+/// Due to `ON UPDATE CASCADE` foreign key constraints, renaming a category automatically
+/// updates all references in transactions and autocat rules.
+///
+/// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
+#[derive(Debug, Parser, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UpdateCategoriesArgs {
+    /// One or more category names to update. All specified categories will receive the same
+    /// updates.
+    #[arg(long, num_args = 1..)]
+    names: Vec<String>,
+
+    /// The fields to update. Only fields with values will be modified; unspecified fields remain
+    /// unchanged.
+    #[clap(flatten)]
+    updates: CategoryUpdates,
+}
+
+impl UpdateCategoriesArgs {
+    pub fn new<S, I>(names: I, updates: CategoryUpdates) -> Result<Self>
+    where
+        S: Into<String>,
+        I: IntoIterator<Item = S>,
+    {
+        let names: Vec<String> = names.into_iter().map(|s| s.into()).collect();
+        if names.is_empty() {
+            return Err(anyhow!("At least one category name is required"))
+                .pub_result(ErrorType::Request);
+        }
+        Ok(Self { names, updates })
+    }
+
+    pub fn names(&self) -> &[String] {
+        &self.names
+    }
+
+    pub fn updates(&self) -> &CategoryUpdates {
+        &self.updates
+    }
+}
+
+/// Args for the `tiller update autocats` command.
+///
+/// Updates one or more AutoCat rules in the local SQLite database by their IDs. At least one
+/// ID must be provided. When more than one ID is provided, all specified rules are updated
+/// with the same field values.
+///
+/// AutoCat rules have a synthetic auto-increment primary key that is assigned when first
+/// synced down or inserted locally.
+///
+/// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
+#[derive(Debug, Parser, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UpdateAutoCatsArgs {
+    /// One or more AutoCat rule IDs to update. All specified rules will receive the same
+    /// updates.
+    #[arg(long, num_args = 1..)]
+    ids: Vec<String>,
+
+    /// The fields to update. Only fields with values will be modified; unspecified fields remain
+    /// unchanged.
+    #[clap(flatten)]
+    updates: AutoCatUpdates,
+}
+
+impl UpdateAutoCatsArgs {
+    pub fn new<S, I>(ids: I, updates: AutoCatUpdates) -> Result<Self>
+    where
+        S: Into<String>,
+        I: IntoIterator<Item = S>,
+    {
+        let ids: Vec<String> = ids.into_iter().map(|s| s.into()).collect();
+        if ids.is_empty() {
+            return Err(anyhow!("At least one AutoCat ID is required"))
+                .pub_result(ErrorType::Request);
+        }
+        Ok(Self { ids, updates })
+    }
+
+    pub fn ids(&self) -> &[String] {
+        &self.ids
+    }
+
+    pub fn updates(&self) -> &AutoCatUpdates {
+        &self.updates
+    }
+}
+
+// =============================================================================
+// Delete command structs
+// =============================================================================
+
+/// Arguments for `tiller delete` commands.
+#[derive(Debug, Parser, Clone)]
+pub struct DeleteArgs {
+    #[command(subcommand)]
+    entity: DeleteSubcommand,
+}
+
+impl DeleteArgs {
+    pub fn entity(&self) -> &DeleteSubcommand {
+        &self.entity
+    }
+}
+
+/// Subcommands for `tiller delete`.
+#[derive(Subcommand, Debug, Clone)]
+pub enum DeleteSubcommand {
+    /// Deletes one or more transactions from the local SQLite database by their IDs. At least one
+    /// transaction ID must be provided.
+    ///
+    /// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
+    ///
+    /// **Warning**: This operation cannot be undone locally. However, if you haven't run `sync up`
+    /// yet, you can restore the transactions by running `sync down` to re-download from the sheet.
+    Transactions(DeleteTransactionsArgs),
+
+    /// Deletes one or more categories from the local SQLite database by their names.
+    ///
+    /// Due to `ON DELETE RESTRICT` foreign key constraints, a category cannot be deleted if any
+    /// transactions or AutoCat rules reference it. You must first update or delete those
+    /// references before deleting the category.
+    ///
+    /// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
+    ///
+    /// **Warning**: This operation cannot be undone locally. However, if you haven't run `sync up`
+    /// yet, you can restore the categories by running `sync down` to re-download from the sheet.
+    Categories(DeleteCategoriesArgs),
+
+    /// Deletes one or more AutoCat rules from the local SQLite database by their IDs.
+    ///
+    /// AutoCat rules have synthetic auto-increment IDs assigned when first synced down or inserted
+    /// locally.
+    ///
+    /// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
+    ///
+    /// **Warning**: This operation cannot be undone locally. However, if you haven't run `sync up`
+    /// yet, you can restore the rules by running `sync down` to re-download from the sheet.
+    Autocats(DeleteAutoCatsArgs),
+}
+
+/// Args for the `tiller delete transactions` command.
+///
+/// Deletes one or more transactions from the local SQLite database by their IDs. At least one
+/// transaction ID must be provided.
+///
+/// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
+///
+/// **Warning**: This operation cannot be undone locally. However, if you haven't run `sync up`
+/// yet, you can restore the transactions by running `sync down` to re-download from the sheet.
+#[derive(Debug, Parser, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteTransactionsArgs {
+    /// One or more transaction IDs to delete.
+    #[arg(long = "id", required = true)]
+    ids: Vec<String>,
+}
+
+impl DeleteTransactionsArgs {
+    pub fn new<S, I>(ids: I) -> Result<Self>
+    where
+        S: Into<String>,
+        I: IntoIterator<Item = S>,
+    {
+        let ids: Vec<String> = ids.into_iter().map(|s| s.into()).collect();
+        if ids.is_empty() {
+            return Err(anyhow!("At least one ID is required")).pub_result(ErrorType::Request);
+        }
+        Ok(Self { ids })
+    }
+
+    pub fn ids(&self) -> &[String] {
+        &self.ids
+    }
+}
+
+/// Args for the `tiller delete categories` command.
+///
+/// Deletes one or more categories from the local SQLite database by their names. At least one
+/// category name must be provided.
+///
+/// Due to `ON DELETE RESTRICT` foreign key constraints, a category cannot be deleted if any
+/// transactions or AutoCat rules reference it. You must first update or delete those references
+/// before deleting the category.
+///
+/// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
+///
+/// **Warning**: This operation cannot be undone locally. However, if you haven't run `sync up`
+/// yet, you can restore the categories by running `sync down` to re-download from the sheet.
+#[derive(Debug, Parser, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteCategoriesArgs {
+    /// One or more category names to delete.
+    #[arg(long = "name", required = true)]
+    names: Vec<String>,
+}
+
+impl DeleteCategoriesArgs {
+    pub fn new<S, I>(names: I) -> Result<Self>
+    where
+        S: Into<String>,
+        I: IntoIterator<Item = S>,
+    {
+        let names: Vec<String> = names.into_iter().map(|s| s.into()).collect();
+        if names.is_empty() {
+            return Err(anyhow!("At least one category name is required"))
+                .pub_result(ErrorType::Request);
+        }
+        Ok(Self { names })
+    }
+
+    pub fn names(&self) -> &[String] {
+        &self.names
+    }
+}
+
+/// Args for the `tiller delete autocats` command.
+///
+/// Deletes one or more AutoCat rules from the local SQLite database by their IDs. At least one
+/// ID must be provided.
+///
+/// AutoCat rules have synthetic auto-increment IDs assigned when first synced down or inserted
+/// locally.
+///
+/// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
+///
+/// **Warning**: This operation cannot be undone locally. However, if you haven't run `sync up`
+/// yet, you can restore the rules by running `sync down` to re-download from the sheet.
+#[derive(Debug, Parser, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteAutoCatsArgs {
+    /// One or more AutoCat rule IDs to delete.
+    #[arg(long = "id", required = true)]
+    ids: Vec<String>,
+}
+
+impl DeleteAutoCatsArgs {
+    pub fn new<S, I>(ids: I) -> Result<Self>
+    where
+        S: Into<String>,
+        I: IntoIterator<Item = S>,
+    {
+        let ids: Vec<String> = ids.into_iter().map(|s| s.into()).collect();
+        if ids.is_empty() {
+            return Err(anyhow!("At least one ID is required")).pub_result(ErrorType::Request);
+        }
+        Ok(Self { ids })
+    }
+
+    pub fn ids(&self) -> &[String] {
+        &self.ids
+    }
+}
+
+/// Arguments for `tiller insert` commands.
+#[derive(Debug, Parser, Clone)]
+pub struct InsertArgs {
+    #[command(subcommand)]
+    entity: InsertSubcommand,
+}
+
+impl InsertArgs {
+    pub fn entity(&self) -> &InsertSubcommand {
+        &self.entity
+    }
+}
+
+/// Subcommands for `tiller insert`.
+#[derive(Subcommand, Debug, Clone)]
+pub enum InsertSubcommand {
+    /// Inserts a new transaction into the local SQLite database.
+    ///
+    /// A unique transaction ID is automatically generated with a `user-` prefix to distinguish it
+    /// from Tiller-created transactions. The generated ID is returned on success.
+    ///
+    /// The `date` and `amount` fields are required. All other fields are optional.
+    ///
+    /// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
+    Transaction(Box<InsertTransactionArgs>),
+
+    /// Inserts a new category into the local SQLite database.
+    ///
+    /// The category name is required and must be unique as it serves as the primary key.
+    /// The name is returned on success.
+    ///
+    /// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
+    Category(InsertCategoryArgs),
+
+    /// Inserts a new AutoCat rule into the local SQLite database.
+    ///
+    /// AutoCat rules define automatic categorization criteria for transactions. The primary key
+    /// is auto-generated and returned on success.
+    ///
+    /// All fields are optional - an empty rule can be created and updated later. However, a useful
+    /// rule typically needs at least a category and one or more filter criteria.
+    ///
+    /// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
+    Autocat(Box<InsertAutoCatArgs>),
+}
+
+/// Args for the `tiller insert transaction` command.
+///
+/// Inserts a new transaction into the local SQLite database. A unique transaction ID is
+/// automatically generated with a `user-` prefix.
+///
+/// The `date` and `amount` fields are required. All other fields are optional.
+///
+/// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
+///
+/// See tiller documentation for more information about the semantic meanings of transaction
+/// columns: <https://help.tiller.com/en/articles/432681-transactions-sheet-columns>
+#[derive(Debug, Clone, Parser, Serialize, Deserialize, JsonSchema)]
+#[schemars(title = "InsertTransactionArgs")]
+pub struct InsertTransactionArgs {
+    /// The posted date (when the transaction cleared) or transaction date (when the transaction
+    /// occurred). Posted date takes priority except for investment accounts. **Required.**
+    #[arg(long)]
+    pub date: String,
+
+    /// Transaction value where income and credits are positive; expenses and debits are negative.
+    /// **Required.**
+    #[arg(long)]
+    pub amount: Amount,
+
+    /// Cleaned-up merchant information from your bank.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub description: Option<String>,
+
+    /// The account name as it appears on your bank's website or your custom nickname from Tiller
+    /// Console.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub account: Option<String>,
+
+    /// Last four digits of the bank account number (e.g., "xxxx1102").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub account_number: Option<String>,
+
+    /// Financial institution name (e.g., "Bank of America").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub institution: Option<String>,
+
+    /// First day of the transaction's month, useful for pivot tables and reporting.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub month: Option<String>,
+
+    /// Sunday date of the transaction's week for weekly breakdowns.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub week: Option<String>,
+
+    /// Unmodified merchant details directly from your bank, including codes and numbers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub full_description: Option<String>,
+
+    /// A unique ID assigned to your accounts by Tiller's systems. Important for troubleshooting;
+    /// do not delete.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub account_id: Option<String>,
+
+    /// Check number when available for checks you write.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub check_number: Option<String>,
+
+    /// When the transaction was added to the spreadsheet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub date_added: Option<String>,
+
+    /// Normalized merchant name standardizing variants (e.g., "Amazon" for multiple Amazon
+    /// formats). Optional automated column.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub merchant_name: Option<String>,
+
+    /// Data provider's category suggestion based on merchant knowledge. Optional automated column;
+    /// not included in core templates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub category_hint: Option<String>,
+
+    /// User-assigned category. Non-automated by default to promote spending awareness; AutoCat
+    /// available for automation. Must reference an existing category name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub category: Option<String>,
+
+    /// Custom notes about specific transactions. Leveraged by Category Rollup reports.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub note: Option<String>,
+
+    /// User-defined tags for additional transaction categorization.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub tags: Option<String>,
+
+    /// Date when AutoCat automatically categorized or updated a transaction. Google Sheets Add-on
+    /// column.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub categorized_date: Option<String>,
+
+    /// For reconciling transactions to bank statements. Google Sheets Add-on column.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub statement: Option<String>,
+
+    /// Supports workflows including CSV imports. Google Sheets Add-on column.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub metadata: Option<String>,
+
+    /// Custom columns not part of the standard Tiller schema.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[arg(long = "other-field", value_parser = utils::parse_key_val)]
+    pub other_fields: BTreeMap<String, String>,
+}
+
+/// Args for the `tiller insert category` command.
+///
+/// Inserts a new category into the local SQLite database. The category name is required and
+/// must be unique as it serves as the primary key.
+///
+/// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
+///
+/// See tiller documentation for more information about the Categories sheet:
+/// <https://help.tiller.com/en/articles/432680-categories-sheet>
+#[derive(Debug, Clone, Parser, Serialize, Deserialize, JsonSchema)]
+#[schemars(title = "InsertCategoryArgs")]
+pub struct InsertCategoryArgs {
+    /// The name of the category. This is the primary key and must be unique. **Required.**
+    #[arg(long)]
+    pub name: String,
+
+    /// The group this category belongs to. Groups organize related categories together for
+    /// reporting purposes (e.g., "Food", "Transportation", "Housing"). All categories should have
+    /// a Group assigned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub group: Option<String>,
+
+    /// The type classification for this category. Common types include "Expense", "Income", and
+    /// "Transfer". All categories should have a Type assigned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long, name = "type")]
+    pub r#type: Option<String>,
+
+    /// Controls visibility in reports. Set to "Hide" to exclude this category from reports.
+    /// This is useful for categories like credit card payments or internal transfers that you
+    /// don't want appearing in spending reports.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub hide_from_reports: Option<String>,
+
+    /// Custom columns not part of the standard Tiller schema.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[arg(long = "other-field", value_parser = utils::parse_key_val)]
+    pub other_fields: BTreeMap<String, String>,
+}
+
+/// Args for the `tiller insert autocat` command.
+///
+/// Inserts a new AutoCat rule into the local SQLite database. The primary key is auto-generated
+/// and returned on success.
+///
+/// All fields are optional - an empty rule can be created and updated later. However, a useful
+/// rule typically needs at least a category and one or more filter criteria.
+///
+/// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
+///
+/// See tiller documentation for more information about AutoCat:
+/// <https://help.tiller.com/en/articles/3792984-autocat-for-google-sheets>
+#[derive(Debug, Clone, Parser, Serialize, Deserialize, JsonSchema)]
+#[schemars(title = "InsertAutoCatArgs")]
+pub struct InsertAutoCatArgs {
+    /// The category to assign when this rule matches. This is an override column - when filter
+    /// conditions match, this category value gets applied to matching transactions. Must reference
+    /// an existing category name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub category: Option<String>,
+
+    /// Override column to standardize or clean up transaction descriptions. For example, replace
+    /// "Seattle Starbucks store 1234" with simply "Starbucks".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub description: Option<String>,
+
+    /// Filter criteria: searches the Description column for matching text (case-insensitive).
+    /// Supports multiple keywords wrapped in quotes and separated by commas (OR-ed together).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub description_contains: Option<String>,
+
+    /// Filter criteria: searches the Account column for matching text to narrow rule application.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub account_contains: Option<String>,
+
+    /// Filter criteria: searches the Institution column for matching text to narrow rule
+    /// application.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub institution_contains: Option<String>,
+
+    /// Filter criteria: minimum transaction amount (absolute value). Use with Amount Max to set
+    /// a range. For negative amounts (expenses), set Amount Polarity to "Negative".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long, value_parser = utils::parse_amount)]
+    pub amount_min: Option<Amount>,
+
+    /// Filter criteria: maximum transaction amount (absolute value). Use with Amount Min to set
+    /// a range. For negative amounts (expenses), set Amount Polarity to "Negative".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long, value_parser = utils::parse_amount)]
+    pub amount_max: Option<Amount>,
+
+    /// Filter criteria: exact amount to match.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long, value_parser = utils::parse_amount)]
+    pub amount_equals: Option<Amount>,
+
+    /// Filter criteria: exact match for the Description column (more specific than "contains").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub description_equals: Option<String>,
+
+    /// Override column for the full/raw description field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub description_full: Option<String>,
+
+    /// Filter criteria: searches the Full Description column for matching text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub full_description_contains: Option<String>,
+
+    /// Filter criteria: searches the Amount column as text for matching patterns.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub amount_contains: Option<String>,
+
+    /// Custom columns not part of the standard Tiller schema.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[arg(long = "other-field", value_parser = utils::parse_key_val)]
+    pub other_fields: BTreeMap<String, String>,
 }
 
 fn default_tiller_home() -> DisplayPath {

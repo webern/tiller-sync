@@ -87,14 +87,6 @@ impl TillerError {
     pub fn is_tool_error(&self) -> bool {
         !self.is_protocol_error()
     }
-
-    // === MCP Conversion Methods ===
-    // These will be implemented when rmcp is added as a dependency.
-    // For now, we provide the structure.
-
-    // TODO: Implement when rmcp is added:
-    // pub fn to_error_data(&self) -> rmcp::model::ErrorData { ... }
-    // pub fn to_tool_error(&self) -> rmcp::model::CallToolResult { ... }
 }
 
 impl fmt::Display for TillerError {

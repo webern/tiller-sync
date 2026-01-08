@@ -64,51 +64,56 @@ Categories, and AutoCats. Let's work on these one item at a time. NEVER do multi
     - [X] Test the command
     - [X] Implement an MCP server for the same command
 
-- [ ] Update Categories
-    - [ ] Design and implement a CLI interface and command for updating a single category by name
-    - [ ] Test the command
-    - [ ] Implement an MCP server for the same command
+CLAUDE: when continuing with the following, make sure you follow the precedent set by transactions
+closely. Namely note the presence of `TransactionUpdates` and note that the same "args" object is
+used in the CLI, the MCP tool, and the command function. Note that column documentation was pulled
+from the tiller website and that a link to it is given.
 
-- [ ] Update AutoCats
-    - [ ] Design and implement a CLI interface and command for updating a single autocat by ID
-    - [ ] Test the command
-    - [ ] Implement an MCP server for the same command
+- [X] Update Categories
+    - [X] Design and implement a CLI interface and command for updating a single category by name
+    - [X] Test the command
+    - [X] Implement an MCP server for the same command
 
-- [ ] Delete Transactions
-    - [ ] Design and implement a CLI interface and command for deleting a single transaction by ID
-    - [ ] Test the command
-    - [ ] Implement an MCP server for the same command
+- [X] Update AutoCats
+    - [X] Design and implement a CLI interface and command for updating a single autocat by ID
+    - [X] Test the command
+    - [X] Implement an MCP server for the same command
 
-- [ ] Delete Categories
-    - [ ] Design and implement a CLI interface and command for deleting a single category by ID
-    - [ ] Test the command
-    - [ ] Implement an MCP server for the same command
+- [X] Delete Transactions
+    - [X] Design and implement a CLI interface and command for deleting a single transaction by ID
+    - [X] Test the command
+    - [X] Implement an MCP server for the same command
 
-- [ ] Delete AutoCats
-    - [ ] Design and implement a CLI interface and command for deleting a single autocat by ID
-    - [ ] Test the command
-    - [ ] Implement an MCP server for the same command
+- [X] Delete Categories
+    - [X] Design and implement a CLI interface and command for deleting a single category by name
+    - [X] Test the command
+    - [X] Implement an MCP server for the same command
 
-- [ ] Insert Transactions
-    - [ ] Design and implement a CLI interface and command for inserting a single transaction. NOTE:
+- [X] Delete AutoCats
+    - [X] Design and implement a CLI interface and command for deleting one or more autocats by ID
+    - [X] Test the command
+    - [X] Implement an MCP server for the same command
+
+- [X] Insert Transaction
+    - [X] Design and implement a CLI interface and command for inserting a single transaction. NOTE:
       for transactions, a unique ID will need to be synthesized prior to table insert and that ID
       will need to be returned to the caller. NOTE: The category field is primary key constrained to
       the categories table.
-    - [ ] Test the command
-    - [ ] Implement an MCP server for the same command
+    - [X] Test the command
+    - [X] Implement an MCP server for the same command
 
-- [ ] Insert Categories
-    - [ ] Design and implement a CLI interface and command for inserting a single category. NOTE:
+- [X] Insert Category
+    - [X] Design and implement a CLI interface and command for inserting a single category. NOTE:
       for categories, the category name will need to be unique as it is the primary key.
-    - [ ] Test the command
-    - [ ] Implement an MCP server for the same command
+    - [X] Test the command
+    - [X] Implement an MCP server for the same command
 
-- [ ] Insert AutoCats
-    - [ ] Design and implement a CLI interface and command for inserting a single autocat. NOTE: The
+- [X] Insert AutoCat
+    - [X] Design and implement a CLI interface and command for inserting a single autocat. NOTE: The
       category field is primary key constrained to the categories table. NOTE: the primary key is
       auto-generated and needs to be returned to the caller.
-    - [ ] Test the command
-    - [ ] Implement an MCP server for the same command
+    - [X] Test the command
+    - [X] Implement an MCP server for the same command
 
 STOP HERE: This part is hard to design. We need to think about how to provide a robust query
 interface that presents all the things a user might want to do with a SQL statement. For this

@@ -1,7 +1,10 @@
 use crate::error::Res;
 use crate::model::items::{Item, Items};
 use crate::model::Amount;
+use crate::utils;
 use anyhow::{bail, Context};
+use clap::Parser;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::str::FromStr;
@@ -29,6 +32,52 @@ pub struct AutoCat {
     /// Row position from last sync down (0-indexed); None for locally-added rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) original_order: Option<u64>,
+}
+
+impl AutoCat {
+    /// Set any of the fields on `self` that are set in `update`.
+    pub fn merge_updates(&mut self, update: AutoCatUpdates) {
+        if let Some(x) = update.category {
+            self.category = x;
+        }
+        if let Some(x) = update.description {
+            self.description = x;
+        }
+        if let Some(x) = update.description_contains {
+            self.description_contains = x;
+        }
+        if let Some(x) = update.account_contains {
+            self.account_contains = x;
+        }
+        if let Some(x) = update.institution_contains {
+            self.institution_contains = x;
+        }
+        if let Some(x) = update.amount_min {
+            self.amount_min = Some(x);
+        }
+        if let Some(x) = update.amount_max {
+            self.amount_max = Some(x);
+        }
+        if let Some(x) = update.amount_equals {
+            self.amount_equals = Some(x);
+        }
+        if let Some(x) = update.description_equals {
+            self.description_equals = x;
+        }
+        if let Some(x) = update.description_full {
+            self.description_full = x;
+        }
+        if let Some(x) = update.full_description_contains {
+            self.full_description_contains = x;
+        }
+        if let Some(x) = update.amount_contains {
+            self.amount_contains = x;
+        }
+
+        for (key, val) in update.other_fields {
+            self.other_fields.insert(key, val);
+        }
+    }
 }
 
 impl Item for AutoCat {
@@ -165,3 +214,82 @@ pub(super) const DESCRIPTION_EQUALS_STR: &str = "Description Equals";
 pub(super) const DESCRIPTION_FULL_STR: &str = "Description Full";
 pub(super) const FULL_DESCRIPTION_CONTAINS_STR: &str = "Full Description Contains";
 pub(super) const AMOUNT_CONTAINS_STR: &str = "Amount Contains";
+
+/// The fields to update in an AutoCat rule. Only set values will be changed, unset values will
+/// not be changed.
+///
+/// See tiller documentation for more information about AutoCat:
+/// <https://help.tiller.com/en/articles/3792984-autocat-for-google-sheets>
+#[derive(Debug, Default, Clone, Parser, Serialize, Deserialize, JsonSchema)]
+pub struct AutoCatUpdates {
+    /// The category to assign when this rule matches. This is an override column - when filter
+    /// conditions match, this category value gets applied to matching transactions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub category: Option<String>,
+
+    /// Override column to standardize or clean up transaction descriptions. For example, replace
+    /// "Seattle Starbucks store 1234" with simply "Starbucks".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub description: Option<String>,
+
+    /// Filter criteria: searches the Description column for matching text (case-insensitive).
+    /// Supports multiple keywords wrapped in quotes and separated by commas (OR-ed together).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub description_contains: Option<String>,
+
+    /// Filter criteria: searches the Account column for matching text to narrow rule application.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub account_contains: Option<String>,
+
+    /// Filter criteria: searches the Institution column for matching text to narrow rule
+    /// application.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub institution_contains: Option<String>,
+
+    /// Filter criteria: minimum transaction amount (absolute value). Use with Amount Max to set
+    /// a range. For negative amounts (expenses), set Amount Polarity to "Negative".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long, value_parser = utils::parse_amount)]
+    pub amount_min: Option<Amount>,
+
+    /// Filter criteria: maximum transaction amount (absolute value). Use with Amount Min to set
+    /// a range. For negative amounts (expenses), set Amount Polarity to "Negative".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long, value_parser = utils::parse_amount)]
+    pub amount_max: Option<Amount>,
+
+    /// Filter criteria: exact amount to match.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long, value_parser = utils::parse_amount)]
+    pub amount_equals: Option<Amount>,
+
+    /// Filter criteria: exact match for the Description column (more specific than "contains").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub description_equals: Option<String>,
+
+    /// Override column for the full/raw description field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub description_full: Option<String>,
+
+    /// Filter criteria: searches the Full Description column for matching text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub full_description_contains: Option<String>,
+
+    /// Filter criteria: searches the Amount column as text for matching patterns.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub amount_contains: Option<String>,
+
+    /// Custom columns not part of the standard Tiller schema.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[arg(long = "other-field", value_parser = utils::parse_key_val)]
+    pub other_fields: BTreeMap<String, String>,
+}

@@ -8,8 +8,8 @@ mod row_col;
 mod transaction;
 
 pub use amount::{Amount, AmountFormat};
-pub use auto_cat::{AutoCat, AutoCats};
-pub use category::{Categories, Category};
+pub use auto_cat::{AutoCat, AutoCatUpdates, AutoCats};
+pub use category::{Categories, Category, CategoryUpdates};
 pub(crate) use mapping::Mapping;
 pub(crate) use row_col::RowCol;
 use serde::{Deserialize, Serialize};
