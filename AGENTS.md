@@ -34,7 +34,7 @@ user.
 This section is here to help AI agents understand what we have been working on and what we need to
 do next.
 
-What's Already Built for `tiller sync up`
+What's Already Built:
 
 1. Data Download (`sync down`) - Complete
 2. Model Layer - Complete
@@ -48,103 +48,13 @@ What's Already Built for `tiller sync up`
 6. Data upload (`sync up`) - Implemented, working
 7. An MCP server is instantiated and working and provides `sync_up` and `sync_down` tools.
 8. Crud operations are available in both CLI and MCP interfaces.
+9. Query operations are available in both CLI and MCP interfaces.
 
-### Next Steps: Query Interface Implementation
+### Next Steps: Release v0.1.0
 
-Implement a raw SQL query interface for AI agents (MCP) and CLI users. See `docs/DESIGN.md` for
-full design details.
-
-#### Implementation Guidelines
-
-- At the end of each phase: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` must pass
-- Use `#[expect(dead_code)]` for code not yet used (NEVER `#[allow(dead_code)]` or `_` prefixes)
-- Do not include code in a phase if it cannot compile with `#[expect(dead_code)]`
-- Commit at the end of each phase with a descriptive message
-
-#### Implementation Plan
-
-**Phase 1: Types and Args**
-
-- [ ] Add `OutputFormat` enum to `src/args.rs` with variants `Json`, `Markdown`, `Csv`
-- [ ] Add `QueryArgs` struct to `src/args.rs` with fields: `sql: String`, `format: Option<OutputFormat>`
-- [ ] Add `SchemaArgs` struct to `src/args.rs` with field: `include_metadata: bool` (default false)
-- [ ] Add `Query` and `Schema` variants to the CLI `Commands` enum in `src/main.rs`
-- [ ] Verify: `cargo fmt && cargo clippy -- -D warnings && cargo test`
-- [ ] Commit: `git commit -m "feat: add QueryArgs, SchemaArgs, and OutputFormat types"`
-
-**Phase 2: Model Layer**
-
-- [ ] Add `JsonSchema` as a supertrait bound on `Item` trait in `src/model/items.rs`
-- [ ] Add `field_descriptions() -> BTreeMap<String, String>` associated function to `Item` trait
-      with default implementation that extracts descriptions from `schemars::schema_for::<Self>()`
-- [ ] Verify: `cargo fmt && cargo clippy -- -D warnings && cargo test`
-- [ ] Commit: `git commit -m "feat: add field_descriptions() to Item trait via JsonSchema"`
-
-**Phase 3: Command Layer**
-
-- [ ] Create `src/commands/query.rs` with:
-  - [ ] `Rows` enum: `Json(serde_json::Value)`, `Table(Vec<String>)`, `Csv(Vec<Vec<String>>)`
-  - [ ] Implement `Debug`, `Display`, `Serialize`, `Deserialize`, `Clone` for `Rows`
-  - [ ] `Schema` struct with `tables: Vec<TableInfo>` (derive `JsonSchema`)
-  - [ ] `TableInfo`, `ColumnInfo`, `IndexInfo`, `ForeignKeyInfo` structs (all derive `JsonSchema`)
-  - [ ] `pub async fn query(config: Config, args: QueryArgs) -> Result<Out<Rows>>`
-  - [ ] `pub async fn schema(config: Config, args: SchemaArgs) -> Result<Out<Schema>>`
-- [ ] Add `pub mod query;` to `src/commands/mod.rs`
-- [ ] Verify: `cargo fmt && cargo clippy -- -D warnings && cargo test`
-- [ ] Commit: `git commit -m "feat: add query and schema command implementations"`
-
-**Phase 4: Database Layer**
-
-- [ ] Modify `Db` struct in `src/db/mod.rs` to hold two pools:
-  - `pool: SqlitePool` (read-write, existing)
-  - `ro_pool: SqlitePool` (read-only, new)
-- [ ] Update `Db::load()` and `Db::init()` to create both pools
-  - Read-only pool uses `?mode=ro` in connection string
-- [ ] Add `pub(crate) async fn execute_query(&self, args: QueryArgs) -> Res<Rows>`
-  - Execute SQL on `ro_pool`
-  - Convert results to appropriate `Rows` variant based on `args.format`
-  - Count rows for message
-- [ ] Add `pub(crate) async fn get_schema(&self, args: SchemaArgs) -> Res<Schema>`
-  - Query `sqlite_master` for tables
-  - Query `PRAGMA table_info()` for columns
-  - Query `PRAGMA index_list()` and `PRAGMA index_info()` for indexes
-  - Query `PRAGMA foreign_key_list()` for foreign keys
-  - Get row counts with `SELECT COUNT(*) FROM <table>`
-  - Get column descriptions from `Item::field_descriptions()` for data tables
-  - Filter tables based on `include_metadata`
-- [ ] Verify: `cargo fmt && cargo clippy -- -D warnings && cargo test`
-- [ ] Commit: `git commit -m "feat: add execute_query and get_schema to Db with read-only pool"`
-
-**Phase 5: MCP Tools**
-
-- [ ] Add `query` tool to `src/mcp/tools.rs`:
-  - `#[tool]` with detailed doc comment explaining raw SQL, read-only, large result warning
-  - Parameters: `sql` (required), `format` (required)
-  - Returns `Rows` via `tool_result()`
-- [ ] Add `schema` tool to `src/mcp/tools.rs`:
-  - `#[tool]` with doc comment explaining schema structure
-  - Parameters: `include_metadata` (optional, default false)
-  - Returns `Schema` via `tool_result()`
-- [ ] Verify: `cargo fmt && cargo clippy -- -D warnings && cargo test`
-- [ ] Commit: `git commit -m "feat: add query and schema MCP tools"`
-
-**Phase 6: Documentation**
-
-- [ ] Add brief mention of `query` and `schema` tools to `src/mcp/docs/INSTRUCTIONS.md`
-- [ ] Verify: `cargo fmt && cargo clippy -- -D warnings && cargo test`
-- [ ] Commit: `git commit -m "docs: add query and schema tools to MCP instructions"`
-
-**Phase 7: Integration Testing**
-
-- [ ] Manual testing of CLI commands:
-  - `tiller query "SELECT * FROM transactions LIMIT 5"`
-  - `tiller query --format markdown "SELECT * FROM categories"`
-  - `tiller query --format csv "SELECT category, COUNT(*) FROM transactions GROUP BY category"`
-  - `tiller schema`
-  - `tiller schema --include-metadata`
-- [ ] Manual testing of MCP tools via `tiller mcp`
-- [ ] Verify: `cargo fmt && cargo clippy -- -D warnings && cargo test`
-- [ ] Commit: `git commit -m "test: verify query interface integration"`
+- Update the README. In particular with installation instructions (cargo install only for now)
+- Try it out (me: the human)
+- Tag and release
 
 ## Instruction Imports
 
@@ -176,6 +86,7 @@ NEVER use `unwrap`, `expect` or any other functions that can explicitly panic in
 it's fine in test code only, NEVER in production code).
 
 For dead code warnings during incremental development:
+
 - Use `#[expect(dead_code)]` to silence warnings (this will error when the code becomes used)
 - NEVER use `#[allow(dead_code)]`
 - NEVER use underscore prefixes (e.g., `_foo`) to silence dead code warnings
