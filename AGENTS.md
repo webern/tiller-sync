@@ -47,89 +47,104 @@ What's Already Built for `tiller sync up`
 5. Database migrations and initial schema creation
 6. Data upload (`sync up`) - Implemented, working
 7. An MCP server is instantiated and working and provides `sync_up` and `sync_down` tools.
+8. Crud operations are available in both CLI and MCP interfaces.
 
-### Next Steps:
+### Next Steps: Query Interface Implementation
 
-Next we need to develop the CLI/MCP interface for interacting with locally stored Transactions,
-Categories, and AutoCats. Let's work on these one item at a time. NEVER do multiple items at a time.
+Implement a raw SQL query interface for AI agents (MCP) and CLI users. See `docs/DESIGN.md` for
+full design details.
 
-- [x] Schema changes (Change migration 1: DO NOT add new migrations)
-    - [x] Change categories table such that the category name field is the primary key
-    - [x] Create a foreign key constraint between transactions and categories.
-    - [x] Create a foreign key constraint between autocats and categories.
-    - [x] Update documentation to note these foreign key constraints
+#### Implementation Guidelines
 
-- [X] Update Transactions
-    - [X] Design and implement a CLI interface and command for updating a single transaction by ID
-    - [X] Test the command
-    - [X] Implement an MCP server for the same command
+- At the end of each phase: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` must pass
+- Use `#[expect(dead_code)]` for code not yet used (NEVER `#[allow(dead_code)]` or `_` prefixes)
+- Do not include code in a phase if it cannot compile with `#[expect(dead_code)]`
+- Commit at the end of each phase with a descriptive message
 
-CLAUDE: when continuing with the following, make sure you follow the precedent set by transactions
-closely. Namely note the presence of `TransactionUpdates` and note that the same "args" object is
-used in the CLI, the MCP tool, and the command function. Note that column documentation was pulled
-from the tiller website and that a link to it is given.
+#### Implementation Plan
 
-- [X] Update Categories
-    - [X] Design and implement a CLI interface and command for updating a single category by name
-    - [X] Test the command
-    - [X] Implement an MCP server for the same command
+**Phase 1: Types and Args**
 
-- [X] Update AutoCats
-    - [X] Design and implement a CLI interface and command for updating a single autocat by ID
-    - [X] Test the command
-    - [X] Implement an MCP server for the same command
+- [ ] Add `OutputFormat` enum to `src/args.rs` with variants `Json`, `Markdown`, `Csv`
+- [ ] Add `QueryArgs` struct to `src/args.rs` with fields: `sql: String`, `format: Option<OutputFormat>`
+- [ ] Add `SchemaArgs` struct to `src/args.rs` with field: `include_metadata: bool` (default false)
+- [ ] Add `Query` and `Schema` variants to the CLI `Commands` enum in `src/main.rs`
+- [ ] Verify: `cargo fmt && cargo clippy -- -D warnings && cargo test`
+- [ ] Commit: `git commit -m "feat: add QueryArgs, SchemaArgs, and OutputFormat types"`
 
-- [X] Delete Transactions
-    - [X] Design and implement a CLI interface and command for deleting a single transaction by ID
-    - [X] Test the command
-    - [X] Implement an MCP server for the same command
+**Phase 2: Model Layer**
 
-- [X] Delete Categories
-    - [X] Design and implement a CLI interface and command for deleting a single category by name
-    - [X] Test the command
-    - [X] Implement an MCP server for the same command
+- [ ] Add `JsonSchema` as a supertrait bound on `Item` trait in `src/model/items.rs`
+- [ ] Add `field_descriptions() -> BTreeMap<String, String>` associated function to `Item` trait
+      with default implementation that extracts descriptions from `schemars::schema_for::<Self>()`
+- [ ] Verify: `cargo fmt && cargo clippy -- -D warnings && cargo test`
+- [ ] Commit: `git commit -m "feat: add field_descriptions() to Item trait via JsonSchema"`
 
-- [X] Delete AutoCats
-    - [X] Design and implement a CLI interface and command for deleting one or more autocats by ID
-    - [X] Test the command
-    - [X] Implement an MCP server for the same command
+**Phase 3: Command Layer**
 
-- [X] Insert Transaction
-    - [X] Design and implement a CLI interface and command for inserting a single transaction. NOTE:
-      for transactions, a unique ID will need to be synthesized prior to table insert and that ID
-      will need to be returned to the caller. NOTE: The category field is primary key constrained to
-      the categories table.
-    - [X] Test the command
-    - [X] Implement an MCP server for the same command
+- [ ] Create `src/commands/query.rs` with:
+  - [ ] `Rows` enum: `Json(serde_json::Value)`, `Table(Vec<String>)`, `Csv(Vec<Vec<String>>)`
+  - [ ] Implement `Debug`, `Display`, `Serialize`, `Deserialize`, `Clone` for `Rows`
+  - [ ] `Schema` struct with `tables: Vec<TableInfo>` (derive `JsonSchema`)
+  - [ ] `TableInfo`, `ColumnInfo`, `IndexInfo`, `ForeignKeyInfo` structs (all derive `JsonSchema`)
+  - [ ] `pub async fn query(config: Config, args: QueryArgs) -> Result<Out<Rows>>`
+  - [ ] `pub async fn schema(config: Config, args: SchemaArgs) -> Result<Out<Schema>>`
+- [ ] Add `pub mod query;` to `src/commands/mod.rs`
+- [ ] Verify: `cargo fmt && cargo clippy -- -D warnings && cargo test`
+- [ ] Commit: `git commit -m "feat: add query and schema command implementations"`
 
-- [X] Insert Category
-    - [X] Design and implement a CLI interface and command for inserting a single category. NOTE:
-      for categories, the category name will need to be unique as it is the primary key.
-    - [X] Test the command
-    - [X] Implement an MCP server for the same command
+**Phase 4: Database Layer**
 
-- [X] Insert AutoCat
-    - [X] Design and implement a CLI interface and command for inserting a single autocat. NOTE: The
-      category field is primary key constrained to the categories table. NOTE: the primary key is
-      auto-generated and needs to be returned to the caller.
-    - [X] Test the command
-    - [X] Implement an MCP server for the same command
+- [ ] Modify `Db` struct in `src/db/mod.rs` to hold two pools:
+  - `pool: SqlitePool` (read-write, existing)
+  - `ro_pool: SqlitePool` (read-only, new)
+- [ ] Update `Db::load()` and `Db::init()` to create both pools
+  - Read-only pool uses `?mode=ro` in connection string
+- [ ] Add `pub(crate) async fn execute_query(&self, args: QueryArgs) -> Res<Rows>`
+  - Execute SQL on `ro_pool`
+  - Convert results to appropriate `Rows` variant based on `args.format`
+  - Count rows for message
+- [ ] Add `pub(crate) async fn get_schema(&self, args: SchemaArgs) -> Res<Schema>`
+  - Query `sqlite_master` for tables
+  - Query `PRAGMA table_info()` for columns
+  - Query `PRAGMA index_list()` and `PRAGMA index_info()` for indexes
+  - Query `PRAGMA foreign_key_list()` for foreign keys
+  - Get row counts with `SELECT COUNT(*) FROM <table>`
+  - Get column descriptions from `Item::field_descriptions()` for data tables
+  - Filter tables based on `include_metadata`
+- [ ] Verify: `cargo fmt && cargo clippy -- -D warnings && cargo test`
+- [ ] Commit: `git commit -m "feat: add execute_query and get_schema to Db with read-only pool"`
 
-STOP HERE: This part is hard to design. We need to think about how to provide a robust query
-interface that presents all the things a user might want to do with a SQL statement. For this
-design, consider the following MCP use-cases:
+**Phase 5: MCP Tools**
 
-- A user wants to use an AI agent to suggest auto-cat rules for transactions that do not have an
-  assigned category. These should be prioritized by frequency of the un-categorized transactions'
-  description fields.
-- A user wants to categorize and tag transactions differently than they are in the category field,
-  or to assign some additional attributes to the transactions then have the LLM do an analysis on
-  the sums.
+- [ ] Add `query` tool to `src/mcp/tools.rs`:
+  - `#[tool]` with detailed doc comment explaining raw SQL, read-only, large result warning
+  - Parameters: `sql` (required), `format` (required)
+  - Returns `Rows` via `tool_result()`
+- [ ] Add `schema` tool to `src/mcp/tools.rs`:
+  - `#[tool]` with doc comment explaining schema structure
+  - Parameters: `include_metadata` (optional, default false)
+  - Returns `Schema` via `tool_result()`
+- [ ] Verify: `cargo fmt && cargo clippy -- -D warnings && cargo test`
+- [ ] Commit: `git commit -m "feat: add query and schema MCP tools"`
 
-- [ ] Query Transactions
-- [ ] Query Categories
-- [ ] Query AutoCats
-- [ ] Query to get all data
+**Phase 6: Documentation**
+
+- [ ] Add brief mention of `query` and `schema` tools to `src/mcp/docs/INSTRUCTIONS.md`
+- [ ] Verify: `cargo fmt && cargo clippy -- -D warnings && cargo test`
+- [ ] Commit: `git commit -m "docs: add query and schema tools to MCP instructions"`
+
+**Phase 7: Integration Testing**
+
+- [ ] Manual testing of CLI commands:
+  - `tiller query "SELECT * FROM transactions LIMIT 5"`
+  - `tiller query --format markdown "SELECT * FROM categories"`
+  - `tiller query --format csv "SELECT category, COUNT(*) FROM transactions GROUP BY category"`
+  - `tiller schema`
+  - `tiller schema --include-metadata`
+- [ ] Manual testing of MCP tools via `tiller mcp`
+- [ ] Verify: `cargo fmt && cargo clippy -- -D warnings && cargo test`
+- [ ] Commit: `git commit -m "test: verify query interface integration"`
 
 ## Instruction Imports
 
@@ -160,7 +175,10 @@ add a line like the following below:
 NEVER use `unwrap`, `expect` or any other functions that can explicitly panic in production code (
 it's fine in test code only, NEVER in production code).
 
-PREFER using an underscore to silence dead_code warnings. Do not use `#[allow(dead_code)]`.
+For dead code warnings during incremental development:
+- Use `#[expect(dead_code)]` to silence warnings (this will error when the code becomes used)
+- NEVER use `#[allow(dead_code)]`
+- NEVER use underscore prefixes (e.g., `_foo`) to silence dead code warnings
 
 ### MCP `rmpc` and `schemars` Descriptions
 
