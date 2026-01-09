@@ -2,8 +2,8 @@
 
 use crate::args::{
     DeleteAutoCatsArgs, DeleteCategoriesArgs, DeleteTransactionsArgs, InsertAutoCatArgs,
-    InsertCategoryArgs, InsertTransactionArgs, UpdateAutoCatsArgs, UpdateCategoriesArgs,
-    UpdateTransactionsArgs,
+    InsertCategoryArgs, InsertTransactionArgs, QueryArgs, SchemaArgs, UpdateAutoCatsArgs,
+    UpdateCategoriesArgs, UpdateTransactionsArgs,
 };
 use crate::commands::{self, FormulasMode};
 use crate::mcp::mcp_utils::tool_result;
@@ -696,6 +696,134 @@ impl TillerServer {
 
         let config = (*self.config).clone();
         let out = commands::insert_autocat(config, args).await;
+        tool_result(out)
+    }
+
+    /// Execute a read-only SQL query against the local SQLite database.
+    ///
+    /// The query interface enforces read-only access using a separate SQLite connection opened with
+    /// `?mode=ro`. Any write attempt (INSERT, UPDATE, DELETE) will be rejected by SQLite.
+    ///
+    /// # Parameters
+    ///
+    /// - `sql`: The SQL query to execute. Must be a valid SQLite SELECT statement. **Required.**
+    /// - `format`: Output format. One of `json`, `markdown`, or `csv`. **Required.**
+    ///
+    /// # Output Formats
+    ///
+    /// - **`json`**: Returns a JSON array of objects where each row is a self-describing object
+    ///   with column names as keys.
+    /// - **`markdown`**: Returns a Markdown-formatted table suitable for display.
+    /// - **`csv`**: Returns CSV format with header row followed by data rows.
+    ///
+    /// # Returns
+    ///
+    /// On success, returns a message indicating the row count and the query results in the
+    /// requested format.
+    ///
+    /// # Warning
+    ///
+    /// Large result sets are returned in full. Consider using LIMIT clauses for potentially
+    /// large queries.
+    ///
+    /// # Example
+    ///
+    /// Query recent transactions:
+    ///
+    /// ```json
+    /// {
+    ///   "sql": "SELECT date, description, amount, category FROM transactions ORDER BY date DESC LIMIT 10",
+    ///   "format": "json"
+    /// }
+    /// ```
+    ///
+    /// Get category spending summary:
+    ///
+    /// ```json
+    /// {
+    ///   "sql": "SELECT category, SUM(amount) as total FROM transactions WHERE amount < 0 GROUP BY category ORDER BY total",
+    ///   "format": "markdown"
+    /// }
+    /// ```
+    #[tool]
+    async fn query(
+        &self,
+        Parameters(args): Parameters<QueryArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        require_init!(self);
+
+        let config = (*self.config).clone();
+        let out = commands::query(config, args).await;
+        tool_result(out)
+    }
+
+    /// Retrieve database schema information.
+    ///
+    /// Returns tables, columns, types, indexes, foreign keys, column descriptions, and row counts.
+    /// This tool helps AI agents understand the database structure before writing queries.
+    ///
+    /// # Parameters
+    ///
+    /// - `include_metadata`: If `true`, includes internal metadata tables (`sheet_metadata`,
+    ///   `formulas`, `schema_version`) in addition to data tables. Default is `false`.
+    ///
+    /// # Returns
+    ///
+    /// Returns a JSON object containing schema information for each table:
+    ///
+    /// - `tables`: Array of table information objects:
+    ///   - `name`: Table name
+    ///   - `row_count`: Number of rows in the table
+    ///   - `columns`: Array of column information:
+    ///     - `name`: Column name
+    ///     - `data_type`: SQLite data type
+    ///     - `nullable`: Whether the column allows NULL values
+    ///     - `primary_key`: Whether the column is part of the primary key
+    ///     - `description`: Description from model doc comments (if available)
+    ///   - `indexes`: Array of index information:
+    ///     - `name`: Index name
+    ///     - `columns`: Columns in the index
+    ///     - `unique`: Whether the index enforces uniqueness
+    ///   - `foreign_keys`: Array of foreign key information:
+    ///     - `columns`: Local columns in the foreign key
+    ///     - `references_table`: Referenced table
+    ///     - `references_columns`: Referenced columns
+    ///
+    /// # Data Tables
+    ///
+    /// The primary data tables are:
+    ///
+    /// - `transactions`: Financial transactions with columns like `transaction_id`, `date`,
+    ///   `description`, `amount`, `category`, etc.
+    /// - `categories`: Budget categories with `category`, `group`, `type`, and `hide_from_reports`.
+    /// - `autocat`: Automatic categorization rules with filter criteria and override columns.
+    ///
+    /// # Example
+    ///
+    /// Get schema for data tables only:
+    ///
+    /// ```json
+    /// {
+    ///   "include_metadata": false
+    /// }
+    /// ```
+    ///
+    /// Get schema including metadata tables:
+    ///
+    /// ```json
+    /// {
+    ///   "include_metadata": true
+    /// }
+    /// ```
+    #[tool]
+    async fn schema(
+        &self,
+        Parameters(args): Parameters<SchemaArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        require_init!(self);
+
+        let config = (*self.config).clone();
+        let out = commands::schema(config, args).await;
         tool_result(out)
     }
 }

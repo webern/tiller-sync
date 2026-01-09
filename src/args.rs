@@ -86,6 +86,15 @@ pub enum Command {
     Delete(DeleteArgs),
     /// Insert a new transaction, category, or autocat rule into the local database.
     Insert(Box<InsertArgs>),
+    /// Execute a read-only SQL query against the local SQLite database.
+    ///
+    /// The query interface enforces read-only access. Any write attempt will be rejected.
+    /// Result sets can be large - use LIMIT clauses to control output size.
+    Query(QueryArgs),
+    /// Display database schema information.
+    ///
+    /// Returns tables, columns, types, indexes, foreign keys, column descriptions, and row counts.
+    Schema(SchemaArgs),
 }
 
 /// Arguments common to all subcommands.
@@ -241,6 +250,70 @@ impl SyncArgs {
 pub struct McpArgs {
     // No additional arguments for now.
     // The --tiller-home flag is inherited from Common.
+}
+
+// =============================================================================
+// Query command structs
+// =============================================================================
+
+/// Output format for query results.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum OutputFormat {
+    /// JSON array of objects where each row is a self-describing object with column names as keys.
+    #[default]
+    Json,
+    /// Markdown table format.
+    #[serde(alias = "md")]
+    Markdown,
+    /// CSV format.
+    Csv,
+}
+
+serde_plain::derive_display_from_serialize!(OutputFormat);
+serde_plain::derive_fromstr_from_deserialize!(OutputFormat);
+
+/// Args for the `tiller query` command.
+///
+/// Execute arbitrary read-only SQL queries against the local SQLite database. The query interface
+/// is designed primarily for AI agents via MCP, with CLI as a secondary interface.
+///
+/// **Read-only access**: The query interface enforces read-only access using a separate SQLite
+/// connection. Any write attempt (INSERT, UPDATE, DELETE) will be rejected by SQLite.
+///
+/// **Warning**: Result sets can be large. Use LIMIT clauses to control output size.
+#[derive(Debug, Clone, Parser, Serialize, Deserialize, JsonSchema)]
+#[schemars(title = "QueryArgs")]
+pub struct QueryArgs {
+    /// The SQL query to execute. Must be a valid SQLite SELECT statement.
+    pub sql: String,
+
+    /// Output format: json, markdown, or csv. Defaults to json for CLI.
+    #[arg(long, default_value = "json")]
+    pub format: OutputFormat,
+}
+
+impl QueryArgs {
+    pub fn new(sql: impl Into<String>, format: OutputFormat) -> Self {
+        Self {
+            sql: sql.into(),
+            format,
+        }
+    }
+}
+
+/// Args for the `tiller schema` command.
+///
+/// Returns database schema information including tables, columns, types, indexes, foreign keys,
+/// column descriptions, and row counts.
+#[derive(Debug, Clone, Parser, Serialize, Deserialize, JsonSchema, Default)]
+#[schemars(title = "SchemaArgs")]
+pub struct SchemaArgs {
+    /// Include internal metadata tables (sheet_metadata, formulas, schema_version) in the output.
+    /// By default, only data tables (transactions, categories, autocat) are shown.
+    #[arg(long, default_value = "false")]
+    #[serde(default)]
+    pub include_metadata: bool,
 }
 
 /// Args for the `tiller update` command.

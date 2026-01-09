@@ -772,9 +772,9 @@ Two new MCP tools wrap the CLI commands:
 
 ```rust
 pub enum Rows {
-    Json(serde_json::Value),    // Array of objects
-    Table(Vec<String>),         // Markdown table lines
-    Csv(Vec<Vec<String>>),      // CSV cells
+    Json(serde_json::Value),  // Array of objects
+    Table(String),            // Markdown table as a formatted string
+    Csv(String),              // CSV data with proper escaping
 }
 ```
 

@@ -10,12 +10,12 @@ use crate::args::{
     UpdateCategoriesArgs, UpdateTransactionsArgs,
 };
 use crate::error::Res;
-use crate::model::{Amount, AutoCat, Category, Mapping, TillerData, Transaction};
+use crate::model::{Amount, AutoCat, Category, Item, Mapping, TillerData, Transaction};
 use anyhow::{bail, Context};
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use sqlx::SqlitePool;
+use sqlx::{Column, SqlitePool};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::str::FromStr;
@@ -55,7 +55,10 @@ pub struct _Row<T> {
 ///
 #[derive(Debug, Clone)]
 pub(crate) struct Db {
+    /// Read-write connection pool for data modifications.
     pool: SqlitePool,
+    /// Read-only connection pool for queries. Uses SQLite's `?mode=ro` to enforce read-only access.
+    ro_pool: SqlitePool,
 }
 
 impl Db {
@@ -69,6 +72,7 @@ impl Db {
             bail!("SQLite database not found at {}", path.display());
         }
 
+        // Read-write connection pool
         let options = SqliteConnectOptions::from_str(&format!("sqlite:{}", path.display()))
             .context("Failed to parse SQLite connection string")?
             .create_if_missing(false)
@@ -81,7 +85,18 @@ impl Db {
             .await
             .context("Failed to connect to SQLite database")?;
 
-        let db = Self { pool };
+        // Read-only connection pool using SQLite's mode=ro
+        let ro_options =
+            SqliteConnectOptions::from_str(&format!("sqlite:{}?mode=ro", path.display()))
+                .context("Failed to parse read-only SQLite connection string")?;
+
+        let ro_pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(ro_options)
+            .await
+            .context("Failed to connect to read-only SQLite database")?;
+
+        let db = Self { pool, ro_pool };
         db.migrate().await?;
 
         Ok(db)
@@ -97,6 +112,7 @@ impl Db {
             bail!("SQLite database already exists at {}", path.display());
         }
 
+        // Read-write connection pool (creates the database)
         let options = SqliteConnectOptions::from_str(&format!("sqlite:{}", path.display()))
             .context("Failed to parse SQLite connection string")?
             .create_if_missing(true)
@@ -109,7 +125,18 @@ impl Db {
             .await
             .context("Failed to create SQLite database")?;
 
-        let db = Self { pool };
+        // Read-only connection pool (opened after creation)
+        let ro_options =
+            SqliteConnectOptions::from_str(&format!("sqlite:{}?mode=ro", path.display()))
+                .context("Failed to parse read-only SQLite connection string")?;
+
+        let ro_pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(ro_options)
+            .await
+            .context("Failed to connect to read-only SQLite database")?;
+
+        let db = Self { pool, ro_pool };
         db.bootstrap().await?;
         db.migrate().await?;
 
@@ -1360,6 +1387,298 @@ impl Db {
         save_mapping(tx, AUTO_CAT, data.auto_cats.mapping()).await?;
 
         Ok(())
+    }
+
+    // =========================================================================
+    // Query interface methods
+    // =========================================================================
+
+    /// Execute a read-only SQL query against the database.
+    ///
+    /// This method uses a read-only connection to ensure that no modifications
+    /// can be made to the database through this interface.
+    pub(crate) async fn execute_query(
+        &self,
+        args: crate::args::QueryArgs,
+    ) -> Res<crate::commands::Out<crate::commands::Rows>> {
+        use crate::args::OutputFormat;
+        use crate::commands::{Out, Rows};
+        use sqlx::Row;
+
+        // Execute the query on the read-only pool
+        let rows = sqlx::query(&args.sql)
+            .fetch_all(&self.ro_pool)
+            .await
+            .context("SQL error")?;
+
+        // Get column names from the first row (or empty if no rows)
+        let columns: Vec<String> = if let Some(row) = rows.first() {
+            row.columns().iter().map(|c| c.name().to_string()).collect()
+        } else {
+            Vec::new()
+        };
+
+        // Convert rows to the requested format
+        let result = match args.format {
+            OutputFormat::Json => {
+                let mut json_rows = Vec::new();
+                for row in &rows {
+                    let mut obj = serde_json::Map::new();
+                    for col in row.columns() {
+                        let name = col.name();
+                        // Try to get value as different types
+                        let value: serde_json::Value = if let Ok(v) = row.try_get::<i64, _>(name) {
+                            serde_json::Value::Number(v.into())
+                        } else if let Ok(v) = row.try_get::<f64, _>(name) {
+                            serde_json::json!(v)
+                        } else if let Ok(v) = row.try_get::<String, _>(name) {
+                            serde_json::Value::String(v)
+                        } else if let Ok(v) = row.try_get::<Option<String>, _>(name) {
+                            match v {
+                                Some(s) => serde_json::Value::String(s),
+                                None => serde_json::Value::Null,
+                            }
+                        } else {
+                            serde_json::Value::Null
+                        };
+                        obj.insert(name.to_string(), value);
+                    }
+                    json_rows.push(serde_json::Value::Object(obj));
+                }
+                Rows::Json(serde_json::Value::Array(json_rows))
+            }
+            OutputFormat::Markdown => {
+                let mut lines = Vec::new();
+                if !columns.is_empty() {
+                    // Header row
+                    lines.push(format!("| {} |", columns.join(" | ")));
+                    // Separator row
+                    let separators: Vec<&str> = columns.iter().map(|_| "---").collect();
+                    lines.push(format!("| {} |", separators.join(" | ")));
+                    // Data rows
+                    for row in &rows {
+                        let values: Vec<String> = columns
+                            .iter()
+                            .map(|col: &String| {
+                                row.try_get::<String, _>(col.as_str())
+                                    .or_else(|_| {
+                                        row.try_get::<i64, _>(col.as_str()).map(|v| v.to_string())
+                                    })
+                                    .or_else(|_| {
+                                        row.try_get::<f64, _>(col.as_str()).map(|v| v.to_string())
+                                    })
+                                    .unwrap_or_else(|_| String::new())
+                            })
+                            .collect();
+                        lines.push(format!("| {} |", values.join(" | ")));
+                    }
+                }
+                Rows::Table(lines.join("\n"))
+            }
+            OutputFormat::Csv => {
+                let mut writer = csv::Writer::from_writer(Vec::new());
+                // Header row
+                if !columns.is_empty() {
+                    writer.write_record(&columns)?;
+                }
+                // Data rows
+                for row in &rows {
+                    let values: Vec<String> = columns
+                        .iter()
+                        .map(|col: &String| {
+                            row.try_get::<String, _>(col.as_str())
+                                .or_else(|_| {
+                                    row.try_get::<i64, _>(col.as_str()).map(|v| v.to_string())
+                                })
+                                .or_else(|_| {
+                                    row.try_get::<f64, _>(col.as_str()).map(|v| v.to_string())
+                                })
+                                .unwrap_or_else(|_| String::new())
+                        })
+                        .collect();
+                    writer.write_record(&values)?;
+                }
+                let csv_string = String::from_utf8(writer.into_inner()?)?;
+                Rows::Csv(csv_string)
+            }
+        };
+
+        let row_count = rows.len();
+        Ok(Out::new(format!("Query returned {row_count} rows"), result))
+    }
+
+    /// Retrieve database schema information.
+    ///
+    /// Returns tables, columns, types, indexes, foreign keys, column descriptions,
+    /// and row counts.
+    pub(crate) async fn get_schema(
+        &self,
+        args: crate::args::SchemaArgs,
+    ) -> Res<crate::commands::Out<crate::commands::Schema>> {
+        use crate::commands::{ColumnInfo, ForeignKeyInfo, IndexInfo, Out, Schema, TableInfo};
+
+        // Tables to query - data tables or all tables including metadata
+        let data_tables = ["transactions", "categories", "autocat"];
+        let metadata_tables = ["sheet_metadata", "formulas", "schema_version"];
+
+        // Query the list of tables from sqlite_master
+        let table_rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+        )
+        .fetch_all(&self.ro_pool)
+        .await?;
+
+        let all_table_names: Vec<&str> = table_rows.iter().map(|(name,)| name.as_str()).collect();
+
+        // Filter tables based on include_metadata flag
+        let table_names: Vec<&str> = if args.include_metadata {
+            all_table_names
+        } else {
+            all_table_names
+                .into_iter()
+                .filter(|name| !metadata_tables.contains(name))
+                .collect()
+        };
+
+        let mut tables = Vec::new();
+
+        for table_name in table_names {
+            // Get column info using PRAGMA table_info
+            let col_rows: Vec<(i64, String, String, i64, Option<String>, i64)> =
+                sqlx::query_as(&format!("PRAGMA table_info({})", table_name))
+                    .fetch_all(&self.ro_pool)
+                    .await?;
+
+            // Get field descriptions from the model types
+            let descriptions: BTreeMap<String, String> = match table_name {
+                "transactions" => Transaction::field_descriptions(),
+                "categories" => Category::field_descriptions(),
+                "autocat" => AutoCat::field_descriptions(),
+                _ => BTreeMap::new(),
+            };
+
+            let columns: Vec<ColumnInfo> = col_rows
+                .iter()
+                .map(|(_, name, data_type, notnull, _, pk)| {
+                    let description = descriptions.get(name).cloned();
+                    ColumnInfo {
+                        name: name.clone(),
+                        data_type: data_type.clone(),
+                        nullable: *notnull == 0,
+                        primary_key: *pk > 0,
+                        description,
+                    }
+                })
+                .collect();
+
+            // Get index info using PRAGMA index_list
+            let index_rows: Vec<(i64, String, i64, String, i64)> =
+                sqlx::query_as(&format!("PRAGMA index_list({})", table_name))
+                    .fetch_all(&self.ro_pool)
+                    .await?;
+
+            let mut indexes = Vec::new();
+            for (_, idx_name, unique, _, _) in &index_rows {
+                // Skip auto-generated indexes for primary keys
+                if idx_name.starts_with("sqlite_autoindex_") {
+                    continue;
+                }
+
+                // Get columns in this index
+                let idx_col_rows: Vec<(i64, i64, String)> =
+                    sqlx::query_as(&format!("PRAGMA index_info({})", idx_name))
+                        .fetch_all(&self.ro_pool)
+                        .await?;
+
+                let idx_columns: Vec<String> = idx_col_rows
+                    .iter()
+                    .map(|(_, _, name)| name.clone())
+                    .collect();
+
+                indexes.push(IndexInfo {
+                    name: idx_name.clone(),
+                    columns: idx_columns,
+                    unique: *unique != 0,
+                });
+            }
+
+            // Get foreign key info using PRAGMA foreign_key_list
+            #[allow(clippy::type_complexity)]
+            let fk_rows: Vec<(
+                i64,
+                i64,
+                String,
+                String,
+                String,
+                String,
+                String,
+                String,
+            )> = sqlx::query_as(&format!("PRAGMA foreign_key_list({})", table_name))
+                .fetch_all(&self.ro_pool)
+                .await?;
+
+            // Group by FK id to handle composite keys
+            let mut fk_map: BTreeMap<i64, (String, Vec<String>, Vec<String>)> = BTreeMap::new();
+            for (id, _, ref_table, from_col, to_col, _, _, _) in fk_rows {
+                let entry = fk_map
+                    .entry(id)
+                    .or_insert_with(|| (ref_table, Vec::new(), Vec::new()));
+                entry.1.push(from_col);
+                entry.2.push(to_col);
+            }
+
+            let foreign_keys: Vec<ForeignKeyInfo> = fk_map
+                .into_values()
+                .map(|(ref_table, from_cols, to_cols)| ForeignKeyInfo {
+                    columns: from_cols,
+                    references_table: ref_table,
+                    references_columns: to_cols,
+                })
+                .collect();
+
+            // Get row count
+            let count_row: (i64,) = sqlx::query_as(&format!("SELECT COUNT(*) FROM {}", table_name))
+                .fetch_one(&self.ro_pool)
+                .await?;
+            let row_count = count_row.0 as u64;
+
+            tables.push(TableInfo {
+                name: table_name.to_string(),
+                row_count,
+                columns,
+                indexes,
+                foreign_keys,
+            });
+        }
+
+        // Sort tables: data tables first (in order), then metadata tables (alphabetically)
+        tables.sort_by(|a, b| {
+            let a_is_data = data_tables.contains(&a.name.as_str());
+            let b_is_data = data_tables.contains(&b.name.as_str());
+            match (a_is_data, b_is_data) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                (true, true) => {
+                    // Sort data tables in predefined order
+                    let a_idx = data_tables
+                        .iter()
+                        .position(|&t| t == a.name)
+                        .unwrap_or(usize::MAX);
+                    let b_idx = data_tables
+                        .iter()
+                        .position(|&t| t == b.name)
+                        .unwrap_or(usize::MAX);
+                    a_idx.cmp(&b_idx)
+                }
+                (false, false) => a.name.cmp(&b.name),
+            }
+        });
+
+        let table_count = tables.len();
+        Ok(Out::new(
+            format!("Schema contains {table_count} tables"),
+            Schema { tables },
+        ))
     }
 }
 
