@@ -1,45 +1,49 @@
 # Tiller Sync
 
-⚠️ Not ready yet!
+A CLI tool and MCP server for syncing data between a [Tiller][tiller] Google Sheet and a local
+SQLite database. Download your transactions, query and edit them locally, then sync changes back to
+your sheet - all from the command line or through an AI agent.
 
-A program for syncing data between a [tiller] Google Sheet and a local SQLite database.
-With it you can download your transactions, make edits to them locally in SQLite, then sync back the
-changes (this part is hard, TBD!)
+## Features
 
-Current Status: `tiller sync down` and `tiller sync up` are working and the MCP server is working.
-This means you can store your transactions locally and can upload them back up to your sheet, either
-with the command line or with an AI agent via MCP, but you cannot manipulate them (unless you use
-SQLite).
+- **Bidirectional sync**: Download transactions from your Tiller sheet and upload local changes back
+- **Local SQLite database**: Query and manipulate your financial data with SQL
+- **CRUD operations**: Create, read, update, and delete transactions, categories, and AutoCat rules
+- **Query interface**: Execute arbitrary SQL queries with JSON, Markdown, or CSV output
+- **MCP server**: Integrate with AI agents like Claude Code for automated financial analysis
 
 ## Table of Contents
 
-- [Overview](#overview)
 - [Installation](#installation)
+    - [For Non-Rust Users](#for-non-rust-users)
 - [Setup](#setup)
     - [Prerequisites](#prerequisites)
     - [Initial Setup](#initial-setup)
 - [Usage](#usage)
+- [Claude Code Integration](#claude-code-integration)
 - [Troubleshooting](#troubleshooting)
-
-## Overview
-
-Tiller Sync is a Rust CLI tool that allows you to sync financial data between your Tiller Google
-Sheet and a local SQLite database. This enables offline access, custom queries, and data
-manipulation
-of your Tiller financial data.
 
 ## Installation
 
-TODO: this will be published to crates.io and possible also as a binary release.
+Install Tiller Sync using Cargo:
 
 ```bash
-# Clone the repository
-git clone https://github.com/webern/tiller-sync.git
-cd tiller-sync
-
-# Build and install
-cargo install --path .
+cargo install tiller-sync
 ```
+
+The binary will be installed to `$CARGO_HOME/bin/tiller` (typically `~/.cargo/bin/tiller`).
+
+### For Non-Rust Users
+
+If you don't have Rust installed, you'll need to install it first:
+
+1. Visit [rustup.rs](https://rustup.rs/) and follow the installation instructions
+2. After installation, ensure `$CARGO_HOME/bin` is in your PATH (the installer usually does this
+   automatically)
+3. Open a new terminal and run `cargo install tiller-sync`
+
+**Note**: `CARGO_HOME` defaults to `~/.cargo` on Unix systems and `%USERPROFILE%\.cargo` on Windows.
+The installed binary will be at `$CARGO_HOME/bin/tiller`.
 
 ## Setup
 
@@ -170,9 +174,30 @@ This will:
 - Update your Google Sheets with any changes made to the local database
 - Create a backup before syncing
 
-### Query Transactions
+### Query Data
 
-*(Coming soon - MCP and query commands are in development)*
+Execute SQL queries against your local database:
+
+```bash
+# Query recent transactions (JSON output)
+tiller query "SELECT date, description, amount FROM transactions ORDER BY date DESC LIMIT 10"
+
+# Get results as a markdown table
+tiller query --format markdown "SELECT category, SUM(amount) as total FROM transactions GROUP BY category"
+
+# Export to CSV
+tiller query --format csv "SELECT * FROM transactions WHERE amount < 0" > expenses.csv
+```
+
+### View Database Schema
+
+```bash
+# Show data tables (transactions, categories, autocat)
+tiller schema
+
+# Include metadata tables
+tiller schema --include-metadata
+```
 
 ### Configuration
 
@@ -208,6 +233,46 @@ tiller sync down
 # Using command-line flag
 tiller --dir /path/to/custom/location sync down
 ```
+
+## Claude Code Integration
+
+Tiller Sync includes an MCP (Model Context Protocol) server that allows AI agents like Claude Code
+to interact with your financial data.
+
+### Adding the MCP Server
+
+After installing Tiller Sync and completing the setup steps above, add it as an MCP server to Claude
+Code:
+
+```bash
+claude mcp add tiller -- tiller --tiller-home ~/tiller mcp
+```
+
+If you're using a custom tiller home directory, adjust the path accordingly:
+
+```bash
+claude mcp add tiller -- tiller --tiller-home /path/to/your/tiller mcp
+```
+
+### Available MCP Tools
+
+Once configured, Claude Code can use the following tools:
+
+- **sync_down** / **sync_up**: Sync data between your Google Sheet and local database
+- **query**: Execute SQL queries against your local database
+- **schema**: View database structure and column descriptions
+- **insert_transaction** / **update_transactions** / **delete_transactions**: Manage transactions
+- **insert_category** / **update_categories** / **delete_categories**: Manage categories
+- **insert_autocat** / **update_autocats** / **delete_autocats**: Manage AutoCat rules
+
+### Example Use Cases
+
+With Claude Code and Tiller Sync, you can:
+
+- Ask Claude to analyze your spending patterns
+- Have Claude suggest AutoCat rules for uncategorized transactions
+- Request spending reports by category, merchant, or time period
+- Get help identifying areas to reduce expenses
 
 ## Troubleshooting
 

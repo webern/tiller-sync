@@ -120,6 +120,16 @@ pub async fn main_inner(args: Args) -> Result<()> {
                     .print(),
             }
         }
+
+        Command::Query(query_args) => {
+            let config = Config::load(home).await?;
+            commands::query(config, query_args.clone()).await?.print()
+        }
+
+        Command::Schema(schema_args) => {
+            let config = Config::load(home).await?;
+            commands::schema(config, schema_args.clone()).await?.print()
+        }
     };
     Ok(())
 }

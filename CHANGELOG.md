@@ -17,6 +17,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Implement `tiller sync down` and `tiller sync up`, mostly in [#17]
 - Implement an MCP server for the `sync up` and `sync down` commands [#18]
 - Implement crud [#19], [#21]
+- Implement queries [#22]
 
 <!-- @formatter:off -->
 
@@ -42,5 +43,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#18]: https://github.com/webern/tiller-sync/pull/18
 [#19]: https://github.com/webern/tiller-sync/pull/19
 [#21]: https://github.com/webern/tiller-sync/pull/21
+[#22]: https://github.com/webern/tiller-sync/pull/22
 
 <!-- Issues -->

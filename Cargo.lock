@@ -2556,9 +2556,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "sheets"
-version = "0.10.0"
-source = "git+https://github.com/webern/oxide-third-party-api-clients?tag=patch-v1#e8545fbfb375223261a15089e1f7372707072ee8"
+name = "sheets-patch"
+version = "0.10.0-patch-v2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b283e1cb298dcd56a5533f76ea68702c40878381b9bc955c474d0d14ab74f493"
 dependencies = [
  "async-recursion",
  "async-trait",
@@ -3035,7 +3036,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_plain",
- "sheets",
+ "sheets-patch",
  "sqlx",
  "tempfile",
  "tokio",

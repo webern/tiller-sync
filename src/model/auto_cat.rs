@@ -13,22 +13,54 @@ use std::str::FromStr;
 pub type AutoCats = Items<AutoCat>;
 
 /// Represents a single row from the AutoCat sheet.
-#[derive(Default, Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct AutoCat {
+    /// The category to assign when this rule matches. This is an override column - when filter
+    /// conditions match, this category value gets applied to matching transactions.
     pub(crate) category: String,
+
+    /// Override column to standardize or clean up transaction descriptions. For example, replace
+    /// "Seattle Starbucks store 1234" with simply "Starbucks".
     pub(crate) description: String,
+
+    /// Filter criteria: searches the Description column for matching text (case-insensitive).
+    /// Supports multiple keywords wrapped in quotes and separated by commas (OR-ed together).
     pub(crate) description_contains: String,
+
+    /// Filter criteria: searches the Account column for matching text to narrow rule application.
     pub(crate) account_contains: String,
+
+    /// Filter criteria: searches the Institution column for matching text to narrow rule
+    /// application.
     pub(crate) institution_contains: String,
+
+    /// Filter criteria: minimum transaction amount (absolute value). Use with Amount Max to set
+    /// a range. For negative amounts (expenses), set Amount Polarity to "Negative".
     pub(crate) amount_min: Option<Amount>,
+
+    /// Filter criteria: maximum transaction amount (absolute value). Use with Amount Min to set
+    /// a range. For negative amounts (expenses), set Amount Polarity to "Negative".
     pub(crate) amount_max: Option<Amount>,
+
+    /// Filter criteria: exact amount to match.
     pub(crate) amount_equals: Option<Amount>,
+
+    /// Filter criteria: exact match for the Description column (more specific than "contains").
     pub(crate) description_equals: String,
+
+    /// Override column for the full/raw description field.
     pub(crate) description_full: String,
+
+    /// Filter criteria: searches the Full Description column for matching text.
     pub(crate) full_description_contains: String,
+
+    /// Filter criteria: searches the Amount column as text for matching patterns.
     pub(crate) amount_contains: String,
+
+    /// Custom columns not part of the standard Tiller schema.
     pub(crate) other_fields: BTreeMap<String, String>,
+
     /// Row position from last sync down (0-indexed); None for locally-added rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) original_order: Option<u64>,
@@ -145,18 +177,30 @@ impl Item for AutoCat {
 #[derive(Default, Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AutoCatColumn {
+    /// The category to assign when this rule matches.
     #[default]
     Category,
+    /// Override column to standardize or clean up transaction descriptions.
     Description,
+    /// Filter criteria: searches the Description column for matching text (case-insensitive).
     DescriptionContains,
+    /// Filter criteria: searches the Account column for matching text.
     AccountContains,
+    /// Filter criteria: searches the Institution column for matching text.
     InstitutionContains,
+    /// Filter criteria: minimum transaction amount (absolute value).
     AmountMin,
+    /// Filter criteria: maximum transaction amount (absolute value).
     AmountMax,
+    /// Filter criteria: exact amount to match.
     AmountEquals,
+    /// Filter criteria: exact match for the Description column.
     DescriptionEquals,
+    /// Override column for the full/raw description field.
     DescriptionFull,
+    /// Filter criteria: searches the Full Description column for matching text.
     FullDescriptionContains,
+    /// Filter criteria: searches the Amount column as text for matching patterns.
     AmountContains,
 }
 

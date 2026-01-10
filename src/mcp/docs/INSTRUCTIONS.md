@@ -141,8 +141,119 @@ Common errors and resolutions:
 After `sync_up` writes data, it re-fetches row counts from each sheet tab and verifies they match
 what was written. The tool reports the final counts on success.
 
+## Query Interface
+
+The `query` and `schema` tools provide read-only access to the local SQLite database. This enables
+AI agents to analyze financial data, generate reports, and understand the data structure without
+modifying anything.
+
+### `query`
+
+Executes a read-only SQL query against the local SQLite database.
+
+**Parameters:**
+
+| Parameter | Type   | Required | Description                                           |
+|-----------|--------|----------|-------------------------------------------------------|
+| `sql`     | string | Yes      | The SQL query to execute (SELECT only)                |
+| `format`  | string | Yes      | Output format: `json`, `markdown`, or `csv`           |
+
+**Output Formats:**
+
+| Format     | Description                                                          |
+|------------|----------------------------------------------------------------------|
+| `json`     | JSON array of objects, each row is an object with column names as keys |
+| `markdown` | Markdown table suitable for display                                  |
+| `csv`      | CSV format with header row followed by data rows                     |
+
+**Security:** The query interface uses a read-only SQLite connection (`?mode=ro`). Any write
+attempt (INSERT, UPDATE, DELETE) will be rejected by SQLite.
+
+**Warning:** Large result sets are returned in full. Use `LIMIT` clauses for potentially large
+queries.
+
+**Example Queries:**
+
+```sql
+-- Recent transactions
+SELECT date, description, amount, category
+FROM transactions
+ORDER BY date DESC
+LIMIT 20
+
+-- Spending by category
+SELECT category, SUM(amount) as total
+FROM transactions
+WHERE amount < 0
+GROUP BY category
+ORDER BY total
+
+-- Uncategorized transactions
+SELECT date, description, amount
+FROM transactions
+WHERE category IS NULL OR category = ''
+ORDER BY date DESC
+
+-- Transaction counts by month
+SELECT strftime('%Y-%m', date) as month, COUNT(*) as count
+FROM transactions
+GROUP BY month
+ORDER BY month DESC
+```
+
+### `schema`
+
+Retrieves database schema information to help understand the data structure.
+
+**Parameters:**
+
+| Parameter          | Type    | Default | Description                              |
+|--------------------|---------|---------|------------------------------------------|
+| `include_metadata` | boolean | `false` | Include internal metadata tables         |
+
+**Data Tables:**
+
+| Table          | Description                         | Primary Key       |
+|----------------|-------------------------------------|-------------------|
+| `transactions` | Financial transactions              | `transaction_id`  |
+| `categories`   | Budget categories                   | `category`        |
+| `autocat`      | Automatic categorization rules      | `id` (auto-incr)  |
+
+**Metadata Tables** (when `include_metadata=true`):
+
+| Table            | Description                                  |
+|------------------|----------------------------------------------|
+| `sheet_metadata` | Column ordering and header mapping per sheet |
+| `formulas`       | Cell formulas from the Google Sheet          |
+| `schema_version` | Database schema version tracking             |
+
+**Schema Output:** Returns JSON with detailed information about each table:
+
+- `tables`: Array of table info objects containing:
+  - `name`: Table name
+  - `row_count`: Number of rows
+  - `columns`: Column details (name, type, nullable, primary key, description)
+  - `indexes`: Index information
+  - `foreign_keys`: Foreign key relationships
+
+**Key Columns in `transactions`:**
+
+| Column           | Type    | Description                                          |
+|------------------|---------|------------------------------------------------------|
+| `transaction_id` | TEXT    | Unique ID (Tiller-assigned or `user-` prefixed)      |
+| `date`           | TEXT    | Transaction date (YYYY-MM-DD)                        |
+| `description`    | TEXT    | Cleaned merchant description                         |
+| `amount`         | TEXT    | Transaction amount (negative = expense)              |
+| `category`       | TEXT    | Assigned category (FK to categories)                 |
+| `account`        | TEXT    | Account name                                         |
+| `institution`    | TEXT    | Financial institution                                |
+| `note`           | TEXT    | User notes                                           |
+| `original_order` | INTEGER | Row position from last sync (for formula tracking)   |
+
 ## Best Practices
 
 1. **Always sync down first** - Establishes baseline for conflict detection and ensures fresh data
 2. **Use `formulas=ignore` when uncertain** - Safest option if you don't need formula preservation
 3. **Avoid `force=true` casually** - It bypasses safety checks; use only when intentional
+4. **Use `schema` before complex queries** - Understand the data structure before writing SQL
+5. **Use `LIMIT` in exploratory queries** - Prevent overwhelming responses with large result sets

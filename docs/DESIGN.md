@@ -704,10 +704,134 @@ Dual logging approach:
 - **stderr**: All log output via `tracing`, useful for debugging when running `tiller mcp` manually.
 - **MCP notifications**: Important messages sent via `notifications/message` so AI clients see them.
 
-TODO: how can messages logged with, e.g., `debug!`, `info!`, etc. be sent to
-`notifications/message`?
+## Query Interface
 
-## Notes and Todos
+The query interface provides AI agents and CLI users the ability to query locally stored data using
+raw SQL. This is designed primarily for AI agents via MCP, with CLI as a secondary interface.
+
+### Design Decisions
+
+1. **Raw SQL**: AI agents are excellent at generating SQL, and raw SQL provides maximum flexibility.
+   No structured query parameters or predefined queries - just pass SQL strings directly.
+
+2. **Read-Only Access**: The query interface enforces read-only access using a separate SQLite
+   connection opened with `?mode=ro`. This is bulletproof - SQLite rejects any write attempt at the
+   database level. Mutations must use the existing CRUD tools (`update_transactions`,
+   `insert_transaction`, etc.).
+
+3. **Dual Connection Pool**: The `Db` struct maintains two connection pools:
+    - Read-write pool: Used by CRUD operations and sync commands
+    - Read-only pool: Used exclusively by the `query` tool
+
+4. **No Row Limits**: The interface does not enforce row limits. AI agents are trusted to use
+   `LIMIT` clauses appropriately. Documentation warns that result sets can be large.
+
+5. **Output Formats**: Both CLI and MCP support three output formats via the `format` parameter:
+    - `json` (default for CLI, required for MCP): JSON array of objects where each row is a
+      self-describing object with column names as keys
+    - `markdown`: Markdown table format
+    - `csv`: CSV format
+
+6. **Error Handling**: SQL errors are wrapped with `.context("SQL error")` to provide the SQLite
+   error message with a clear prefix.
+
+### CLI Commands
+
+```bash
+# Execute a SQL query (defaults to JSON output)
+tiller query "SELECT * FROM transactions WHERE category = 'Food' LIMIT 10"
+
+# Specify output format
+tiller query --format markdown "SELECT * FROM transactions LIMIT 5"
+tiller query --format csv "SELECT category, SUM(amount) FROM transactions GROUP BY category"
+
+# Get database schema (data tables only)
+tiller schema
+
+# Include metadata tables in schema
+tiller schema --include-metadata
+```
+
+### MCP Tools
+
+Two new MCP tools wrap the CLI commands:
+
+- **query**: Executes arbitrary read-only SQL. Parameters: `sql` (required), `format` (required).
+- **schema**: Returns database schema information. Parameters: `include_metadata` (optional,
+  defaults to false).
+
+### Query Tool
+
+**Parameters:**
+
+- `sql: String` - The SQL query to execute (required)
+- `format: OutputFormat` - Output format: `json`, `markdown`, or `csv` (required for MCP, defaults
+  to `json` for CLI)
+
+**Returns:** `Out<Rows>` where `Rows` is an enum:
+
+```rust
+pub enum Rows {
+    Json(serde_json::Value),  // Array of objects
+    Table(String),            // Markdown table as a formatted string
+    Csv(String),              // CSV data with proper escaping
+}
+```
+
+The `Out.message` states the number of rows returned (e.g., "Query returned 42 rows").
+
+### Schema Tool
+
+**Parameters:**
+
+- `include_metadata: bool` - Whether to include internal tables (`sheet_metadata`, `formulas`,
+  `schema_version`). Defaults to `false`.
+
+**Returns:** `Out<Schema>` - always returns structured data (no format parameter).
+
+```rust
+pub struct Schema {
+    pub tables: Vec<TableInfo>,
+}
+
+pub struct TableInfo {
+    pub name: String,
+    pub row_count: u64,
+    pub columns: Vec<ColumnInfo>,
+    pub indexes: Vec<IndexInfo>,
+    pub foreign_keys: Vec<ForeignKeyInfo>,
+}
+
+pub struct ColumnInfo {
+    pub name: String,
+    pub data_type: String,
+    pub nullable: bool,
+    pub primary_key: bool,
+    pub description: Option<String>,
+}
+
+pub struct IndexInfo {
+    pub name: String,
+    pub columns: Vec<String>,
+    pub unique: bool,
+}
+
+pub struct ForeignKeyInfo {
+    pub columns: Vec<String>,
+    pub references_table: String,
+    pub references_columns: Vec<String>,
+}
+```
+
+### Column Descriptions
+
+Column descriptions in `Schema` output come from doc comments on model struct fields via
+`schemars`. The `Item` trait has a `JsonSchema` supertrait bound and provides a default
+implementation of `field_descriptions() -> BTreeMap<String, String>` that extracts descriptions
+from the JsonSchema at runtime. This provides a single source of truth - descriptions are
+maintained only in model doc comments.
+
+## Notes
 
 This describes editing the transactions sheet:
 https://help.tiller.com/en/articles/432679-editing-the-transactions-sheet

@@ -1,6 +1,7 @@
 use crate::error::Res;
 use crate::model::{Mapping, RowCol};
 use anyhow::{bail, Context};
+use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -21,7 +22,7 @@ where
     formulas: BTreeMap<RowCol, String>,
 }
 
-pub trait Item {
+pub trait Item: JsonSchema {
     /// Given the `header` name and the `value`, set the appropriate struct field.
     fn set_with_header<S1, S2>(&mut self, header: S1, value: S2) -> Res<()>
     where
@@ -44,6 +45,25 @@ pub trait Item {
     /// Get the field named `original_order` which is the row index in which the data row appeared
     /// in the spreadsheet during download.
     fn get_original_order(&self) -> Option<u64>;
+
+    /// Returns a map of field names to their descriptions, extracted from the JsonSchema.
+    /// Descriptions come from doc comments on struct fields.
+    fn field_descriptions() -> BTreeMap<String, String> {
+        let schema = schemars::schema_for!(Self);
+        let mut descriptions = BTreeMap::new();
+
+        // Get the "properties" object from the schema
+        if let Some(serde_json::Value::Object(properties)) = schema.get("properties") {
+            for (name, prop_schema) in properties {
+                // Get the "description" field from each property's schema
+                if let Some(serde_json::Value::String(desc)) = prop_schema.get("description") {
+                    descriptions.insert(name.clone(), desc.clone());
+                }
+            }
+        }
+
+        descriptions
+    }
 }
 
 fn parse_row<S1, S2, Iter, T>(headers: &[S1], values: Iter, original_order: u64) -> Res<T>

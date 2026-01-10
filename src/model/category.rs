@@ -11,16 +11,30 @@ use std::collections::BTreeMap;
 pub type Categories = Items<Category>;
 
 /// Represents a single row from the Category sheet.
-#[derive(Default, Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct Category {
-    // TODO: make these private again
+    /// The name of the category. This is the primary key and must be unique.
     pub(crate) category: String,
+
+    /// The group this category belongs to. Groups organize related categories together for
+    /// reporting purposes (e.g., "Food", "Transportation", "Housing"). All categories should have
+    /// a Group assigned.
     pub(crate) category_group: String,
+
+    /// The type classification for this category. Common types include "Expense", "Income", and
+    /// "Transfer". All categories should have a Type assigned.
     #[serde(rename = "type")]
     pub(crate) r#type: String,
+
+    /// Controls visibility in reports. Set to "Hide" to exclude this category from reports.
+    /// This is useful for categories like credit card payments or internal transfers that you
+    /// don't want appearing in spending reports.
     pub(crate) hide_from_reports: String,
+
+    /// Custom columns not part of the standard Tiller schema.
     pub(crate) other_fields: BTreeMap<String, String>,
+
     /// Row position from last sync down (0-indexed); None for locally-added rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) original_order: Option<u64>,
@@ -97,11 +111,17 @@ impl Item for Category {
 #[derive(Default, Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CategoryColumn {
+    /// The name of the category. This is the primary key and must be unique.
     #[default]
     Category,
+    /// The group this category belongs to. Groups organize related categories together for
+    /// reporting purposes (e.g., "Food", "Transportation", "Housing").
     Group,
+    /// The type classification for this category. Common types include "Expense", "Income", and
+    /// "Transfer".
     #[serde(rename = "type")]
     Type,
+    /// Controls visibility in reports. Set to "Hide" to exclude this category from reports.
     HideFromReports,
 }
 
