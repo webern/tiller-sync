@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 keywords = ["tiller", "finance", "budgeting", "mcp", "ai"]
 description = "A tool for downloading, uploading and manipulating Tiller Google sheet data using CLI or MCP"
+authors = ["Matthew James Briggs <matthew.james.briggs@gmail.com>"]
+repository = "https://github.com/webern/tiller-sync"
+categories = ["finance", "command-line-utilities", ]
 license = "MIT"
 
 [[bin]]
