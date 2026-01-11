@@ -6,12 +6,12 @@ use std::path::Path;
 
 /// Creates the data directory, its subdirectories and:
 /// - Creates an initial `config.json` file using `sheet_url` along with default settings
-/// - Moves `secret_file` into its default location in the data dir.
+/// - Copies `secret_file` into its default location in the data dir.
 ///
 /// # Arguments
 /// - `tiller_home` - The directory that will be the root of data directory, e.g. `$HOME/tiller`
 /// - `secret_file` - The downloaded OAuth 2.0 client credentials JSON needed to start the Google
-///   OAuth workflow. This will be moved from the `secret_file` path to its default location and
+///   OAuth workflow. This will be copied from the `secret_file` path to its default location and
 ///   name in the data directory.
 /// - `sheet_url` - The URL of the Google Sheet where the Tiller financial data is stored.
 ///   e.g.https://docs.google.com/spreadsheets/d/1a7Km9FxQwRbPt82JvN4LzYpH5OcGnWsT6iDuE3VhMjX

@@ -40,7 +40,7 @@ tiller init \
 The `tiller init` command:
 
 - Creates the data directory structure (including `.secrets/` and `.backups/` subdirectories)
-- Moves the OAuth credentials file to `.secrets/client_secret.json`
+- Copies the OAuth credentials file to `.secrets/client_secret.json`
 - Creates an initial `config.json` with the provided settings (such as sheet URL)
 
 **Arguments:**

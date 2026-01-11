@@ -29,19 +29,6 @@ where
         .with_context(|| format!("Failed to parse JSON file at {}", path.display()))
 }
 
-/// Basically move a file. Renames `from` -> `to`.
-pub(crate) async fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Res<()> {
-    tokio::fs::rename(from.as_ref(), to.as_ref())
-        .await
-        .with_context(|| {
-            format!(
-                "Unable to copy file from '{}' to '{}'",
-                from.as_ref().to_string_lossy(),
-                to.as_ref().to_string_lossy()
-            )
-        })
-}
-
 pub(crate) async fn canonicalize(path: impl AsRef<Path>) -> Res<PathBuf> {
     tokio::fs::canonicalize(path.as_ref())
         .await

@@ -41,12 +41,12 @@ pub struct Config {
 impl Config {
     /// Creates the data directory, its subdirectories and:
     /// - Creates an initial `config.json` file using `sheet_url` along with default settings
-    /// - Moves `secret_file` into its default location in the data dir.
+    /// - Copies `secret_file` into its default location in the data dir.
     ///
     /// # Arguments
     /// - `dir` - The directory that will be the root of data directory, e.g. `$HOME/tiller`
     /// - `secret_file` - The downloaded OAuth 2.0 client credentials JSON needed to start the Google
-    ///   OAuth workflow. This will be moved from the `secret_file` path to its default location and
+    ///   OAuth workflow. This will be copied from the `secret_file` path to its default location and
     ///   name in the data directory.
     /// - `sheet_url` - The URL of the Google Sheet where the Tiller financial data is stored.
     ///   e.g.https://docs.google.com/spreadsheets/d/1a7Km9FxQwRbPt82JvN4LzYpH5OcGnWsT6iDuE3VhMjX
@@ -76,9 +76,9 @@ impl Config {
             .await
             .pub_result(ErrorType::Internal)?;
 
-        // Move the Google OAuth client credentials file to its default location in the data dir
+        // Copy the Google OAuth client credentials file to its default location in the data dir
         let secret_destination = secrets_dir.join(CLIENT_SECRET_JSON);
-        utils::rename(secret_file, secret_destination)
+        utils::copy(secret_file, &secret_destination)
             .await
             .pub_result(ErrorType::Internal)?;
         let config_path = root.join(CONFIG_JSON);
