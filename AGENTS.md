@@ -34,7 +34,8 @@ user.
 This section is here to help AI agents understand what we have been working on and what we need to
 do next.
 
-What's Already Built:
+The software is currently feature-complete. Here are the status updates from when it was being build
+signifying the order in which subsystems were constructed:
 
 1. Data Download (`sync down`) - Complete
 2. Model Layer - Complete
@@ -49,12 +50,7 @@ What's Already Built:
 7. An MCP server is instantiated and working and provides `sync_up` and `sync_down` tools.
 8. Crud operations are available in both CLI and MCP interfaces.
 9. Query operations are available in both CLI and MCP interfaces.
-
-### Next Steps: Release v0.1.0
-
-- Update the README. In particular with installation instructions (cargo install only for now)
-- Try it out (me: the human)
-- Tag and release
+10. One or more releases has been published.
 
 ## Instruction Imports
 
