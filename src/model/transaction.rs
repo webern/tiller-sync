@@ -337,30 +337,32 @@ serde_plain::derive_fromstr_from_deserialize!(TransactionColumn);
 impl TransactionColumn {
     pub fn from_header(header: impl AsRef<str>) -> Res<TransactionColumn> {
         let header_str = header.as_ref();
-        match header_str {
-            TRANSACTION_ID_STR => Ok(TransactionColumn::TransactionId),
-            DATE_STR => Ok(TransactionColumn::Date),
-            DESCRIPTION_STR => Ok(TransactionColumn::Description),
-            AMOUNT_STR => Ok(TransactionColumn::Amount),
-            ACCOUNT_STR => Ok(TransactionColumn::Account),
-            ACCOUNT_NUMBER_STR => Ok(TransactionColumn::AccountNumber),
-            INSTITUTION_STR => Ok(TransactionColumn::Institution),
-            MONTH_STR => Ok(TransactionColumn::Month),
-            WEEK_STR => Ok(TransactionColumn::Week),
-            FULL_DESCRIPTION_STR => Ok(TransactionColumn::FullDescription),
-            ACCOUNT_ID_STR => Ok(TransactionColumn::AccountId),
-            CHECK_NUMBER_STR => Ok(TransactionColumn::CheckNumber),
-            DATE_ADDED_STR => Ok(TransactionColumn::DateAdded),
-            MERCHANT_NAME_STR => Ok(TransactionColumn::MerchantName),
-            CATEGORY_HINT_STR => Ok(TransactionColumn::CategoryHint),
-            CATEGORY_STR => Ok(TransactionColumn::Category),
-            NOTE_STR => Ok(TransactionColumn::Note),
-            TAGS_STR => Ok(TransactionColumn::Tags),
-            CATEGORIZED_DATE_STR => Ok(TransactionColumn::CategorizedDate),
-            STATEMENT_STR => Ok(TransactionColumn::Statement),
-            METADATA_STR => Ok(TransactionColumn::Metadata),
-            NO_NAME_STR => Ok(TransactionColumn::NoName),
-            bad => bail!("Invalid transaction column name '{bad}'"),
+        // Case-insensitive matching for robustness across different sheet configurations
+        let header_lower = header_str.to_lowercase();
+        match header_lower.as_str() {
+            "transaction id" => Ok(TransactionColumn::TransactionId),
+            "date" => Ok(TransactionColumn::Date),
+            "description" => Ok(TransactionColumn::Description),
+            "amount" => Ok(TransactionColumn::Amount),
+            "account" => Ok(TransactionColumn::Account),
+            "account #" | "account number" => Ok(TransactionColumn::AccountNumber),
+            "institution" => Ok(TransactionColumn::Institution),
+            "month" => Ok(TransactionColumn::Month),
+            "week" => Ok(TransactionColumn::Week),
+            "full description" => Ok(TransactionColumn::FullDescription),
+            "account id" => Ok(TransactionColumn::AccountId),
+            "check number" => Ok(TransactionColumn::CheckNumber),
+            "date added" => Ok(TransactionColumn::DateAdded),
+            "merchant name" => Ok(TransactionColumn::MerchantName),
+            "category hint" => Ok(TransactionColumn::CategoryHint),
+            "category" => Ok(TransactionColumn::Category),
+            "note" => Ok(TransactionColumn::Note),
+            "tags" => Ok(TransactionColumn::Tags),
+            "categorized date" => Ok(TransactionColumn::CategorizedDate),
+            "statement" => Ok(TransactionColumn::Statement),
+            "metadata" => Ok(TransactionColumn::Metadata),
+            "" => Ok(TransactionColumn::NoName),
+            _ => bail!("Invalid transaction column name '{}'", header_str),
         }
     }
 
