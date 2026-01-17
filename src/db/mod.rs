@@ -2632,7 +2632,7 @@ mod tests {
 #[cfg(test)]
 mod hide_from_reports_tests {
     use super::*;
-    use crate::model::{Categories, TillerData, Transactions, AutoCats};
+    use crate::model::{AutoCats, Categories, TillerData, Transactions};
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -2656,24 +2656,44 @@ mod hide_from_reports_tests {
         // Verify parsed values BEFORE saving to database
         let data_before = categories.data();
         assert_eq!(data_before[0].category, "Investment");
-        assert_eq!(data_before[0].hide_from_reports, "Hide", "Investment should have hide_from_reports='Hide' after parsing");
-        
+        assert_eq!(
+            data_before[0].hide_from_reports, "Hide",
+            "Investment should have hide_from_reports='Hide' after parsing"
+        );
+
         assert_eq!(data_before[1].category, "Reimbursable");
-        assert_eq!(data_before[1].hide_from_reports, "Hide", "Reimbursable should have hide_from_reports='Hide' after parsing");
-        
+        assert_eq!(
+            data_before[1].hide_from_reports, "Hide",
+            "Reimbursable should have hide_from_reports='Hide' after parsing"
+        );
+
         assert_eq!(data_before[2].category, "Regular");
-        assert_eq!(data_before[2].hide_from_reports, "", "Regular should have hide_from_reports='' after parsing");
+        assert_eq!(
+            data_before[2].hide_from_reports, "",
+            "Regular should have hide_from_reports='' after parsing"
+        );
 
         // Create minimal TillerData (empty transactions and autocats)
         let transactions = Transactions::parse(
-            vec![vec!["Transaction ID", "Date", "Description", "Amount", "Account", "Account #", "Institution", "Account ID"]],
+            vec![vec![
+                "Transaction ID",
+                "Date",
+                "Description",
+                "Amount",
+                "Account",
+                "Account #",
+                "Institution",
+                "Account ID",
+            ]],
             Vec::<Vec<&str>>::new(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let auto_cats = AutoCats::parse(
             vec![vec!["Category", "Description Contains"]],
             Vec::<Vec<&str>>::new(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let tiller_data = TillerData {
             transactions,
