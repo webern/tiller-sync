@@ -210,20 +210,33 @@ serde_plain::derive_fromstr_from_deserialize!(AutoCatColumn);
 impl AutoCatColumn {
     pub fn from_header(header: impl AsRef<str>) -> Res<AutoCatColumn> {
         let header_str = header.as_ref();
-        match header_str {
-            CATEGORY_STR => Ok(AutoCatColumn::Category),
-            DESCRIPTION_STR => Ok(AutoCatColumn::Description),
-            DESCRIPTION_CONTAINS_STR => Ok(AutoCatColumn::DescriptionContains),
-            ACCOUNT_CONTAINS_STR => Ok(AutoCatColumn::AccountContains),
-            INSTITUTION_CONTAINS_STR => Ok(AutoCatColumn::InstitutionContains),
-            AMOUNT_MIN_STR => Ok(AutoCatColumn::AmountMin),
-            AMOUNT_MAX_STR => Ok(AutoCatColumn::AmountMax),
-            AMOUNT_EQUALS_STR => Ok(AutoCatColumn::AmountEquals),
-            DESCRIPTION_EQUALS_STR => Ok(AutoCatColumn::DescriptionEquals),
-            DESCRIPTION_FULL_STR => Ok(AutoCatColumn::DescriptionFull),
-            FULL_DESCRIPTION_CONTAINS_STR => Ok(AutoCatColumn::FullDescriptionContains),
-            AMOUNT_CONTAINS_STR => Ok(AutoCatColumn::AmountContains),
-            bad => bail!("Invalid AutoCat column name '{bad}'"),
+        // Case-insensitive matching for robustness across different sheet configurations
+        if header_str.eq_ignore_ascii_case(CATEGORY_STR) {
+            Ok(AutoCatColumn::Category)
+        } else if header_str.eq_ignore_ascii_case(DESCRIPTION_STR) {
+            Ok(AutoCatColumn::Description)
+        } else if header_str.eq_ignore_ascii_case(DESCRIPTION_CONTAINS_STR) {
+            Ok(AutoCatColumn::DescriptionContains)
+        } else if header_str.eq_ignore_ascii_case(ACCOUNT_CONTAINS_STR) {
+            Ok(AutoCatColumn::AccountContains)
+        } else if header_str.eq_ignore_ascii_case(INSTITUTION_CONTAINS_STR) {
+            Ok(AutoCatColumn::InstitutionContains)
+        } else if header_str.eq_ignore_ascii_case(AMOUNT_MIN_STR) {
+            Ok(AutoCatColumn::AmountMin)
+        } else if header_str.eq_ignore_ascii_case(AMOUNT_MAX_STR) {
+            Ok(AutoCatColumn::AmountMax)
+        } else if header_str.eq_ignore_ascii_case(AMOUNT_EQUALS_STR) {
+            Ok(AutoCatColumn::AmountEquals)
+        } else if header_str.eq_ignore_ascii_case(DESCRIPTION_EQUALS_STR) {
+            Ok(AutoCatColumn::DescriptionEquals)
+        } else if header_str.eq_ignore_ascii_case(DESCRIPTION_FULL_STR) {
+            Ok(AutoCatColumn::DescriptionFull)
+        } else if header_str.eq_ignore_ascii_case(FULL_DESCRIPTION_CONTAINS_STR) {
+            Ok(AutoCatColumn::FullDescriptionContains)
+        } else if header_str.eq_ignore_ascii_case(AMOUNT_CONTAINS_STR) {
+            Ok(AutoCatColumn::AmountContains)
+        } else {
+            bail!("Invalid AutoCat column name '{}'", header_str)
         }
     }
 }

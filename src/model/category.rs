@@ -131,12 +131,17 @@ serde_plain::derive_fromstr_from_deserialize!(CategoryColumn);
 impl CategoryColumn {
     pub fn from_header(header: impl AsRef<str>) -> Res<CategoryColumn> {
         let header_str = header.as_ref();
-        match header_str {
-            CATEGORY_STR => Ok(CategoryColumn::Category),
-            GROUP_STR => Ok(CategoryColumn::Group),
-            TYPE_STR => Ok(CategoryColumn::Type),
-            HIDE_FROM_REPORTS_STR => Ok(CategoryColumn::HideFromReports),
-            bad => bail!("Invalid category column name '{bad}'"),
+        // Case-insensitive matching for robustness across different sheet configurations
+        if header_str.eq_ignore_ascii_case(CATEGORY_STR) {
+            Ok(CategoryColumn::Category)
+        } else if header_str.eq_ignore_ascii_case(GROUP_STR) {
+            Ok(CategoryColumn::Group)
+        } else if header_str.eq_ignore_ascii_case(TYPE_STR) {
+            Ok(CategoryColumn::Type)
+        } else if header_str.eq_ignore_ascii_case(HIDE_FROM_REPORTS_STR) {
+            Ok(CategoryColumn::HideFromReports)
+        } else {
+            bail!("Invalid category column name '{}'", header_str)
         }
     }
 }
@@ -144,7 +149,7 @@ impl CategoryColumn {
 pub(super) const CATEGORY_STR: &str = "Category";
 pub(super) const GROUP_STR: &str = "Group";
 pub(super) const TYPE_STR: &str = "Type";
-pub(super) const HIDE_FROM_REPORTS_STR: &str = "Hide from Reports";
+pub(super) const HIDE_FROM_REPORTS_STR: &str = "Hide From Reports";
 
 /// The fields to update in a category row. Only set values will be changed, unset values will
 /// not be changed.
@@ -184,4 +189,138 @@ pub struct CategoryUpdates {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     #[arg(long = "other-field", value_parser = utils::parse_key_val)]
     pub other_fields: BTreeMap<String, String>,
+}
+
+#[cfg(test)]
+mod parse_tests {
+    use crate::model::Categories;
+
+    #[test]
+    fn test_parse_with_hide_values() {
+        // Simulate data from Google Sheets
+        let categories = Categories::parse(
+            vec![
+                vec!["Category", "Group", "Type", "Hide From Reports"],
+                vec!["Auto & Gas", "Auto", "Expense", ""], // Empty
+                vec!["Bills", "Home", "Expense", ""],      // Empty
+                vec!["Investment", "Investment", "Transfer", "Hide"], // Has Hide
+                vec!["Reimbursable", "Work", "Expense", "Hide"], // Has Hide
+                vec!["Regular", "Food", "Expense", ""],    // Empty
+            ],
+            Vec::<Vec<&str>>::new(),
+        )
+        .unwrap();
+
+        let data = categories.data();
+        assert_eq!(data.len(), 5);
+
+        // Check each category
+        assert_eq!(data[0].category, "Auto & Gas");
+        assert_eq!(
+            data[0].hide_from_reports, "",
+            "Auto & Gas should have empty hide_from_reports"
+        );
+
+        assert_eq!(data[1].category, "Bills");
+        assert_eq!(
+            data[1].hide_from_reports, "",
+            "Bills should have empty hide_from_reports"
+        );
+
+        assert_eq!(data[2].category, "Investment");
+        assert_eq!(
+            data[2].hide_from_reports, "Hide",
+            "Investment should have hide_from_reports='Hide', but got '{}'",
+            data[2].hide_from_reports
+        );
+
+        assert_eq!(data[3].category, "Reimbursable");
+        assert_eq!(
+            data[3].hide_from_reports, "Hide",
+            "Reimbursable should have hide_from_reports='Hide', but got '{}'",
+            data[3].hide_from_reports
+        );
+
+        assert_eq!(data[4].category, "Regular");
+        assert_eq!(
+            data[4].hide_from_reports, "",
+            "Regular should have empty hide_from_reports"
+        );
+
+        println!("✓ All categories parsed correctly with mixed Hide and empty values");
+    }
+
+    #[test]
+    fn test_parse_with_missing_trailing_column() {
+        // Simulate what happens if Google Sheets omits trailing empty cells
+        let categories = Categories::parse(
+            vec![
+                vec!["Category", "Group", "Type", "Hide From Reports"],
+                // This row is missing the Hide From Reports column entirely
+                vec!["Short Row", "Test", "Expense"],
+                // This row has all columns
+                vec!["Full Row", "Test", "Expense", "Hide"],
+            ],
+            Vec::<Vec<&str>>::new(),
+        )
+        .unwrap();
+
+        let data = categories.data();
+        assert_eq!(data.len(), 2);
+
+        assert_eq!(data[0].category, "Short Row");
+        assert_eq!(
+            data[0].hide_from_reports, "",
+            "Short Row should have empty hide_from_reports when column is missing"
+        );
+
+        assert_eq!(data[1].category, "Full Row");
+        assert_eq!(
+            data[1].hide_from_reports, "Hide",
+            "Full Row should have hide_from_reports='Hide'"
+        );
+    }
+
+    #[test]
+    fn test_case_insensitive_headers() {
+        // Test various case combinations
+        let test_cases = vec![
+            ("Hide From Reports", "capitalized F,R"),
+            ("hide from reports", "all lowercase"),
+            ("HIDE FROM REPORTS", "all uppercase"),
+            ("HiDe FrOm RePoRtS", "mixed case"),
+        ];
+
+        for (header, description) in test_cases {
+            let categories = Categories::parse(
+                vec![
+                    vec!["Category", "Group", "Type", header],
+                    vec!["Investment", "Investment", "Transfer", "Hide"],
+                ],
+                Vec::<Vec<&str>>::new(),
+            )
+            .unwrap();
+
+            let data = categories.data();
+            assert_eq!(data.len(), 1);
+
+            let cat = &data[0];
+            assert_eq!(
+                cat.hide_from_reports, "Hide",
+                "Failed for header '{}' ({}): expected hide_from_reports='Hide', got '{}'",
+                header, description, cat.hide_from_reports
+            );
+
+            // Should NOT be in other_fields
+            assert_eq!(
+                cat.other_fields.get(header),
+                None,
+                "Value should not be in other_fields for header '{}' ({})",
+                header,
+                description
+            );
+        }
+
+        println!("✓ All case variations handled correctly");
+    }
 }
