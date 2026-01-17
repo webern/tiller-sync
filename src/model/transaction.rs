@@ -338,31 +338,52 @@ impl TransactionColumn {
     pub fn from_header(header: impl AsRef<str>) -> Res<TransactionColumn> {
         let header_str = header.as_ref();
         // Case-insensitive matching for robustness across different sheet configurations
-        let header_lower = header_str.to_lowercase();
-        match header_lower.as_str() {
-            "transaction id" => Ok(TransactionColumn::TransactionId),
-            "date" => Ok(TransactionColumn::Date),
-            "description" => Ok(TransactionColumn::Description),
-            "amount" => Ok(TransactionColumn::Amount),
-            "account" => Ok(TransactionColumn::Account),
-            "account #" | "account number" => Ok(TransactionColumn::AccountNumber),
-            "institution" => Ok(TransactionColumn::Institution),
-            "month" => Ok(TransactionColumn::Month),
-            "week" => Ok(TransactionColumn::Week),
-            "full description" => Ok(TransactionColumn::FullDescription),
-            "account id" => Ok(TransactionColumn::AccountId),
-            "check number" => Ok(TransactionColumn::CheckNumber),
-            "date added" => Ok(TransactionColumn::DateAdded),
-            "merchant name" => Ok(TransactionColumn::MerchantName),
-            "category hint" => Ok(TransactionColumn::CategoryHint),
-            "category" => Ok(TransactionColumn::Category),
-            "note" => Ok(TransactionColumn::Note),
-            "tags" => Ok(TransactionColumn::Tags),
-            "categorized date" => Ok(TransactionColumn::CategorizedDate),
-            "statement" => Ok(TransactionColumn::Statement),
-            "metadata" => Ok(TransactionColumn::Metadata),
-            "" => Ok(TransactionColumn::NoName),
-            _ => bail!("Invalid transaction column name '{}'", header_str),
+        if header_str.eq_ignore_ascii_case(TRANSACTION_ID_STR) {
+            Ok(TransactionColumn::TransactionId)
+        } else if header_str.eq_ignore_ascii_case(DATE_STR) {
+            Ok(TransactionColumn::Date)
+        } else if header_str.eq_ignore_ascii_case(DESCRIPTION_STR) {
+            Ok(TransactionColumn::Description)
+        } else if header_str.eq_ignore_ascii_case(AMOUNT_STR) {
+            Ok(TransactionColumn::Amount)
+        } else if header_str.eq_ignore_ascii_case(ACCOUNT_STR) {
+            Ok(TransactionColumn::Account)
+        } else if header_str.eq_ignore_ascii_case(ACCOUNT_NUMBER_STR) {
+            Ok(TransactionColumn::AccountNumber)
+        } else if header_str.eq_ignore_ascii_case(INSTITUTION_STR) {
+            Ok(TransactionColumn::Institution)
+        } else if header_str.eq_ignore_ascii_case(MONTH_STR) {
+            Ok(TransactionColumn::Month)
+        } else if header_str.eq_ignore_ascii_case(WEEK_STR) {
+            Ok(TransactionColumn::Week)
+        } else if header_str.eq_ignore_ascii_case(FULL_DESCRIPTION_STR) {
+            Ok(TransactionColumn::FullDescription)
+        } else if header_str.eq_ignore_ascii_case(ACCOUNT_ID_STR) {
+            Ok(TransactionColumn::AccountId)
+        } else if header_str.eq_ignore_ascii_case(CHECK_NUMBER_STR) {
+            Ok(TransactionColumn::CheckNumber)
+        } else if header_str.eq_ignore_ascii_case(DATE_ADDED_STR) {
+            Ok(TransactionColumn::DateAdded)
+        } else if header_str.eq_ignore_ascii_case(MERCHANT_NAME_STR) {
+            Ok(TransactionColumn::MerchantName)
+        } else if header_str.eq_ignore_ascii_case(CATEGORY_HINT_STR) {
+            Ok(TransactionColumn::CategoryHint)
+        } else if header_str.eq_ignore_ascii_case(CATEGORY_STR) {
+            Ok(TransactionColumn::Category)
+        } else if header_str.eq_ignore_ascii_case(NOTE_STR) {
+            Ok(TransactionColumn::Note)
+        } else if header_str.eq_ignore_ascii_case(TAGS_STR) {
+            Ok(TransactionColumn::Tags)
+        } else if header_str.eq_ignore_ascii_case(CATEGORIZED_DATE_STR) {
+            Ok(TransactionColumn::CategorizedDate)
+        } else if header_str.eq_ignore_ascii_case(STATEMENT_STR) {
+            Ok(TransactionColumn::Statement)
+        } else if header_str.eq_ignore_ascii_case(METADATA_STR) {
+            Ok(TransactionColumn::Metadata)
+        } else if header_str.eq_ignore_ascii_case(NO_NAME_STR) {
+            Ok(TransactionColumn::NoName)
+        } else {
+            bail!("Invalid transaction column name '{}'", header_str)
         }
     }
 

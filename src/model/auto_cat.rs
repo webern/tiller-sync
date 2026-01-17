@@ -211,21 +211,32 @@ impl AutoCatColumn {
     pub fn from_header(header: impl AsRef<str>) -> Res<AutoCatColumn> {
         let header_str = header.as_ref();
         // Case-insensitive matching for robustness across different sheet configurations
-        let header_lower = header_str.to_lowercase();
-        match header_lower.as_str() {
-            "category" => Ok(AutoCatColumn::Category),
-            "description" => Ok(AutoCatColumn::Description),
-            "description contains" => Ok(AutoCatColumn::DescriptionContains),
-            "account contains" => Ok(AutoCatColumn::AccountContains),
-            "institution contains" => Ok(AutoCatColumn::InstitutionContains),
-            "amount min" => Ok(AutoCatColumn::AmountMin),
-            "amount max" => Ok(AutoCatColumn::AmountMax),
-            "amount equals" => Ok(AutoCatColumn::AmountEquals),
-            "description equals" => Ok(AutoCatColumn::DescriptionEquals),
-            "description full" => Ok(AutoCatColumn::DescriptionFull),
-            "full description contains" => Ok(AutoCatColumn::FullDescriptionContains),
-            "amount contains" => Ok(AutoCatColumn::AmountContains),
-            _ => bail!("Invalid AutoCat column name '{}'", header_str),
+        if header_str.eq_ignore_ascii_case(CATEGORY_STR) {
+            Ok(AutoCatColumn::Category)
+        } else if header_str.eq_ignore_ascii_case(DESCRIPTION_STR) {
+            Ok(AutoCatColumn::Description)
+        } else if header_str.eq_ignore_ascii_case(DESCRIPTION_CONTAINS_STR) {
+            Ok(AutoCatColumn::DescriptionContains)
+        } else if header_str.eq_ignore_ascii_case(ACCOUNT_CONTAINS_STR) {
+            Ok(AutoCatColumn::AccountContains)
+        } else if header_str.eq_ignore_ascii_case(INSTITUTION_CONTAINS_STR) {
+            Ok(AutoCatColumn::InstitutionContains)
+        } else if header_str.eq_ignore_ascii_case(AMOUNT_MIN_STR) {
+            Ok(AutoCatColumn::AmountMin)
+        } else if header_str.eq_ignore_ascii_case(AMOUNT_MAX_STR) {
+            Ok(AutoCatColumn::AmountMax)
+        } else if header_str.eq_ignore_ascii_case(AMOUNT_EQUALS_STR) {
+            Ok(AutoCatColumn::AmountEquals)
+        } else if header_str.eq_ignore_ascii_case(DESCRIPTION_EQUALS_STR) {
+            Ok(AutoCatColumn::DescriptionEquals)
+        } else if header_str.eq_ignore_ascii_case(DESCRIPTION_FULL_STR) {
+            Ok(AutoCatColumn::DescriptionFull)
+        } else if header_str.eq_ignore_ascii_case(FULL_DESCRIPTION_CONTAINS_STR) {
+            Ok(AutoCatColumn::FullDescriptionContains)
+        } else if header_str.eq_ignore_ascii_case(AMOUNT_CONTAINS_STR) {
+            Ok(AutoCatColumn::AmountContains)
+        } else {
+            bail!("Invalid AutoCat column name '{}'", header_str)
         }
     }
 }
@@ -247,6 +258,19 @@ fn optional_amount_to_string(amount: &Option<Amount>) -> String {
         None => String::new(),
     }
 }
+
+pub(super) const CATEGORY_STR: &str = "Category";
+pub(super) const DESCRIPTION_STR: &str = "Description";
+pub(super) const DESCRIPTION_CONTAINS_STR: &str = "Description Contains";
+pub(super) const ACCOUNT_CONTAINS_STR: &str = "Account Contains";
+pub(super) const INSTITUTION_CONTAINS_STR: &str = "Institution Contains";
+pub(super) const AMOUNT_MIN_STR: &str = "Amount Min";
+pub(super) const AMOUNT_MAX_STR: &str = "Amount Max";
+pub(super) const AMOUNT_EQUALS_STR: &str = "Amount Equals";
+pub(super) const DESCRIPTION_EQUALS_STR: &str = "Description Equals";
+pub(super) const DESCRIPTION_FULL_STR: &str = "Description Full";
+pub(super) const FULL_DESCRIPTION_CONTAINS_STR: &str = "Full Description Contains";
+pub(super) const AMOUNT_CONTAINS_STR: &str = "Amount Contains";
 
 /// The fields to update in an AutoCat rule. Only set values will be changed, unset values will
 /// not be changed.

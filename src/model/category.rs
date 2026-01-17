@@ -132,16 +132,24 @@ impl CategoryColumn {
     pub fn from_header(header: impl AsRef<str>) -> Res<CategoryColumn> {
         let header_str = header.as_ref();
         // Case-insensitive matching for robustness across different sheet configurations
-        let header_lower = header_str.to_lowercase();
-        match header_lower.as_str() {
-            "category" => Ok(CategoryColumn::Category),
-            "group" => Ok(CategoryColumn::Group),
-            "type" => Ok(CategoryColumn::Type),
-            "hide from reports" => Ok(CategoryColumn::HideFromReports),
-            _ => bail!("Invalid category column name '{}'", header_str),
+        if header_str.eq_ignore_ascii_case(CATEGORY_STR) {
+            Ok(CategoryColumn::Category)
+        } else if header_str.eq_ignore_ascii_case(GROUP_STR) {
+            Ok(CategoryColumn::Group)
+        } else if header_str.eq_ignore_ascii_case(TYPE_STR) {
+            Ok(CategoryColumn::Type)
+        } else if header_str.eq_ignore_ascii_case(HIDE_FROM_REPORTS_STR) {
+            Ok(CategoryColumn::HideFromReports)
+        } else {
+            bail!("Invalid category column name '{}'", header_str)
         }
     }
 }
+
+pub(super) const CATEGORY_STR: &str = "Category";
+pub(super) const GROUP_STR: &str = "Group";
+pub(super) const TYPE_STR: &str = "Type";
+pub(super) const HIDE_FROM_REPORTS_STR: &str = "Hide From Reports";
 
 /// The fields to update in a category row. Only set values will be changed, unset values will
 /// not be changed.
@@ -185,7 +193,6 @@ pub struct CategoryUpdates {
 
 #[cfg(test)]
 mod parse_tests {
-    use super::*;
     use crate::model::Categories;
 
     #[test]
@@ -193,7 +200,7 @@ mod parse_tests {
         // Simulate data from Google Sheets
         let categories = Categories::parse(
             vec![
-                vec!["Category", "Group", "Type", "Hide from Reports"],
+                vec!["Category", "Group", "Type", "Hide From Reports"],
                 vec!["Auto & Gas", "Auto", "Expense", ""], // Empty
                 vec!["Bills", "Home", "Expense", ""],      // Empty
                 vec!["Investment", "Investment", "Transfer", "Hide"], // Has Hide
@@ -248,8 +255,8 @@ mod parse_tests {
         // Simulate what happens if Google Sheets omits trailing empty cells
         let categories = Categories::parse(
             vec![
-                vec!["Category", "Group", "Type", "Hide from Reports"],
-                // This row is missing the Hide from Reports column entirely
+                vec!["Category", "Group", "Type", "Hide From Reports"],
+                // This row is missing the Hide From Reports column entirely
                 vec!["Short Row", "Test", "Expense"],
                 // This row has all columns
                 vec!["Full Row", "Test", "Expense", "Hide"],
@@ -273,48 +280,47 @@ mod parse_tests {
             "Full Row should have hide_from_reports='Hide'"
         );
     }
-}
 
-#[test]
-fn test_case_insensitive_headers() {
-    // Test various case combinations
-    let test_cases = vec![
-        ("Hide from Reports", "lowercase f,r"),
-        ("Hide From Reports", "capitalized F,R"),
-        ("HIDE FROM REPORTS", "all uppercase"),
-        ("hide from reports", "all lowercase"),
-        ("HiDe FrOm RePoRtS", "mixed case"),
-    ];
+    #[test]
+    fn test_case_insensitive_headers() {
+        // Test various case combinations
+        let test_cases = vec![
+            ("Hide From Reports", "capitalized F,R"),
+            ("hide from reports", "all lowercase"),
+            ("HIDE FROM REPORTS", "all uppercase"),
+            ("HiDe FrOm RePoRtS", "mixed case"),
+        ];
 
-    for (header, description) in test_cases {
-        let categories = Categories::parse(
-            vec![
-                vec!["Category", "Group", "Type", header],
-                vec!["Investment", "Investment", "Transfer", "Hide"],
-            ],
-            Vec::<Vec<&str>>::new(),
-        )
-        .unwrap();
+        for (header, description) in test_cases {
+            let categories = Categories::parse(
+                vec![
+                    vec!["Category", "Group", "Type", header],
+                    vec!["Investment", "Investment", "Transfer", "Hide"],
+                ],
+                Vec::<Vec<&str>>::new(),
+            )
+            .unwrap();
 
-        let data = categories.data();
-        assert_eq!(data.len(), 1);
+            let data = categories.data();
+            assert_eq!(data.len(), 1);
 
-        let cat = &data[0];
-        assert_eq!(
-            cat.hide_from_reports, "Hide",
-            "Failed for header '{}' ({}): expected hide_from_reports='Hide', got '{}'",
-            header, description, cat.hide_from_reports
-        );
+            let cat = &data[0];
+            assert_eq!(
+                cat.hide_from_reports, "Hide",
+                "Failed for header '{}' ({}): expected hide_from_reports='Hide', got '{}'",
+                header, description, cat.hide_from_reports
+            );
 
-        // Should NOT be in other_fields
-        assert_eq!(
-            cat.other_fields.get(header),
-            None,
-            "Value should not be in other_fields for header '{}' ({})",
-            header,
-            description
-        );
+            // Should NOT be in other_fields
+            assert_eq!(
+                cat.other_fields.get(header),
+                None,
+                "Value should not be in other_fields for header '{}' ({})",
+                header,
+                description
+            );
+        }
+
+        println!("✓ All case variations handled correctly");
     }
-
-    println!("✓ All case variations handled correctly");
 }
