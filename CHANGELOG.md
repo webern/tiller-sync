@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [v0.1.1]
+
 ### Fixed
 
 - Category, Hide From Reports is now persisted. [#24] fixed in [#26]
@@ -33,7 +35,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 <!-- Tags -->
 
-[Unreleased]: https://github.com/webern/tiller/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/webern/tiller-sync/compare/v0.1.1...HEAD
+[v0.1.1]: https://github.com/webern/tiller-sync/releases/tag/v0.1.1
 [v0.1.0]: https://github.com/webern/tiller-sync/releases/tag/v0.1.0
 
 <!-- Pull Requests -->
