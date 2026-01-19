@@ -26,4 +26,4 @@ Examples:
     - Change the version in Cargo.toml
     - Run the following commands to check everything:
         - `cargo test`
-        - `cargo publish --dry-run`
+        - `cargo publish --dry-run --allow-dirty`
