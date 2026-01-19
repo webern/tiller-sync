@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Category, Hide From Reports is now persisted. [#24] fixed in [#26]
+
+### Changed
+
+- The secrets file is now copied instead of moved during `tiller init` [#23]
+
+## [v0.1.0]
+
 ### Added
 
 - Initial project structure, documentation and design [#3], [#4]
@@ -23,7 +33,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 <!-- Tags -->
 
-[Unreleased]: https://github.com/webern/tiller/compare/9c4b07a...HEAD
+[Unreleased]: https://github.com/webern/tiller/compare/v0.1.0...HEAD
+[v0.1.0]: https://github.com/webern/tiller-sync/releases/tag/v0.1.0
 
 <!-- Pull Requests -->
 [#3]: https://github.com/webern/tiller-sync/pull/3
@@ -44,5 +55,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#19]: https://github.com/webern/tiller-sync/pull/19
 [#21]: https://github.com/webern/tiller-sync/pull/21
 [#22]: https://github.com/webern/tiller-sync/pull/22
+[#23]: https://github.com/webern/tiller-sync/pull/23
+[#26]: https://github.com/webern/tiller-sync/pull/26
 
 <!-- Issues -->
+[#24]: https://github.com/webern/tiller-sync/issues/24
