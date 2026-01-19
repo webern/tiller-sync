@@ -144,7 +144,7 @@ impl CategoryColumn {
 pub(super) const CATEGORY_STR: &str = "Category";
 pub(super) const GROUP_STR: &str = "Group";
 pub(super) const TYPE_STR: &str = "Type";
-pub(super) const HIDE_FROM_REPORTS_STR: &str = "Hide from Reports";
+pub(super) const HIDE_FROM_REPORTS_STR: &str = "Hide From Reports";
 
 /// The fields to update in a category row. Only set values will be changed, unset values will
 /// not be changed.

@@ -239,9 +239,24 @@ mod tests {
         );
         assert_eq!(
             tiller_data.categories.data().len(),
-            5,
-            "Should have 5 categories from TestSheet"
+            6,
+            "Should have 6 categories from TestSheet"
         );
+
+        // Assert that "Hidden Category" has the value "Hide".
+        // Bug fix: https://github.com/webern/tiller-sync/issues/24
+        let hidden_category = tiller_data
+            .categories
+            .data()
+            .iter()
+            .find(|&item| item.category == "Hidden Category")
+            .unwrap();
+        assert_eq!(
+            hidden_category.hide_from_reports, "Hide",
+            "The 'Hide From Reports' column should be properly serialized and deserialized but it \
+            wasn't. This could be a regression of https://github.com/webern/tiller-sync/issues/24"
+        );
+
         assert_eq!(
             tiller_data.auto_cats.data().len(),
             3,
