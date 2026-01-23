@@ -10,7 +10,9 @@ use crate::args::{
     UpdateCategoriesArgs, UpdateTransactionsArgs,
 };
 use crate::error::Res;
-use crate::model::{Amount, AutoCat, Category, Item, Mapping, TillerData, Transaction};
+use crate::model::{
+    Amount, AutoCat, Category, Date, DateFromOpt, Item, Mapping, TillerData, Transaction,
+};
 use anyhow::{bail, Context};
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
@@ -22,7 +24,7 @@ use std::str::FromStr;
 
 /// The target schema version for the database. This equals the highest migration number available.
 /// When `migration_05_up.sql` is the highest numbered migration, this should be `5`.
-pub(crate) const CURRENT_VERSION: i32 = 1;
+pub(crate) const CURRENT_VERSION: i32 = 2;
 
 /// Represents a row in the database in a table for which the primary key is not known in
 /// `TillerData`. Namely, rows from the `categories` and `autocats` tables.
@@ -309,14 +311,14 @@ impl Db {
 
             transactions_data.push(Transaction {
                 transaction_id: r.get("transaction_id"),
-                date: r.get("date"),
+                date: Date::parse(r.get::<&str, _>("date"))?,
                 description: r.get("description"),
                 amount: Amount::new(Decimal::from_f64(amount_val).unwrap_or_default()),
                 account: r.get("account"),
                 account_number: r.get("account_number"),
                 institution: r.get("institution"),
-                month: r.get::<Option<String>, _>("month").unwrap_or_default(),
-                week: r.get::<Option<String>, _>("week").unwrap_or_default(),
+                month: r.get::<Option<String>, _>("month").date_from_opt()?,
+                week: r.get::<Option<String>, _>("week").date_from_opt()?,
                 full_description: r
                     .get::<Option<String>, _>("full_description")
                     .unwrap_or_default(),
@@ -324,7 +326,7 @@ impl Db {
                 check_number: r
                     .get::<Option<String>, _>("check_number")
                     .unwrap_or_default(),
-                date_added: r.get::<Option<String>, _>("date_added").unwrap_or_default(),
+                date_added: r.get::<Option<String>, _>("date_added").date_from_opt()?,
                 merchant_name: r
                     .get::<Option<String>, _>("merchant_name")
                     .unwrap_or_default(),
@@ -336,7 +338,7 @@ impl Db {
                 tags: r.get::<Option<String>, _>("tags").unwrap_or_default(),
                 categorized_date: r
                     .get::<Option<String>, _>("categorized_date")
-                    .unwrap_or_default(),
+                    .date_from_opt()?,
                 statement: r.get::<Option<String>, _>("statement").unwrap_or_default(),
                 metadata: r.get::<Option<String>, _>("metadata").unwrap_or_default(),
                 other_fields,
@@ -636,8 +638,8 @@ impl Db {
                     account: r.get("account"),
                     account_number: r.get("account_number"),
                     institution: r.get("institution"),
-                    month: r.get::<Option<String>, _>("month").unwrap_or_default(),
-                    week: r.get::<Option<String>, _>("week").unwrap_or_default(),
+                    month: r.get::<Option<String>, _>("month").date_from_opt()?,
+                    week: r.get::<Option<String>, _>("week").date_from_opt()?,
                     full_description: r
                         .get::<Option<String>, _>("full_description")
                         .unwrap_or_default(),
@@ -645,7 +647,7 @@ impl Db {
                     check_number: r
                         .get::<Option<String>, _>("check_number")
                         .unwrap_or_default(),
-                    date_added: r.get::<Option<String>, _>("date_added").unwrap_or_default(),
+                    date_added: r.get::<Option<String>, _>("date_added").date_from_opt()?,
                     merchant_name: r
                         .get::<Option<String>, _>("merchant_name")
                         .unwrap_or_default(),
@@ -657,7 +659,7 @@ impl Db {
                     tags: r.get::<Option<String>, _>("tags").unwrap_or_default(),
                     categorized_date: r
                         .get::<Option<String>, _>("categorized_date")
-                        .unwrap_or_default(),
+                        .date_from_opt()?,
                     statement: r.get::<Option<String>, _>("statement").unwrap_or_default(),
                     metadata: r.get::<Option<String>, _>("metadata").unwrap_or_default(),
                     other_fields,
@@ -1842,7 +1844,7 @@ mod tests {
 
         let mut transaction = Transaction::default();
         transaction.transaction_id = "txn-001".to_string();
-        transaction.date = "2025-01-15".to_string();
+        transaction.date = "2025-01-15".try_into().unwrap();
         transaction.description = "Coffee Shop".to_string();
         transaction.account = "Checking".to_string();
         transaction.account_number = "1234".to_string();
@@ -1879,7 +1881,7 @@ mod tests {
         // Update via the method
         let mut transaction = Transaction::default();
         transaction.transaction_id = "txn-001".to_string();
-        transaction.date = "2025-01-15".to_string();
+        transaction.date = "2025-01-15".try_into().unwrap();
         transaction.description = "Updated Description".to_string();
         transaction.account = "Checking".to_string();
         transaction.account_number = "1234".to_string();
@@ -2173,7 +2175,7 @@ mod tests {
 
         let mut transaction = Transaction::default();
         transaction.transaction_id = "txn-other".to_string();
-        transaction.date = "2025-01-15".to_string();
+        transaction.date = "2025-01-15".try_into().unwrap();
         transaction.description = "Test".to_string();
         transaction.account = "Checking".to_string();
         transaction.account_number = "1234".to_string();
@@ -2227,7 +2229,7 @@ mod tests {
 
         let mut transaction = Transaction::default();
         transaction.transaction_id = "txn-dup".to_string();
-        transaction.date = "2025-01-15".to_string();
+        transaction.date = "2025-01-15".try_into().unwrap();
         transaction.description = "First".to_string();
         transaction.account = "Checking".to_string();
         transaction.account_number = "1234".to_string();

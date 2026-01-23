@@ -7,6 +7,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Dates are now stored in a useful (ISO) format in the database. [#28] fixed in [#29]
+
 ## [v0.1.1]
 
 ### Fixed
@@ -60,6 +64,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#22]: https://github.com/webern/tiller-sync/pull/22
 [#23]: https://github.com/webern/tiller-sync/pull/23
 [#26]: https://github.com/webern/tiller-sync/pull/26
+[#29]: https://github.com/webern/tiller-sync/pull/29
 
 <!-- Issues -->
 [#24]: https://github.com/webern/tiller-sync/issues/24
+[#28]: https://github.com/webern/tiller-sync/issues/28

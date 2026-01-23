@@ -2,7 +2,7 @@
 
 use crate::commands::FormulasMode;
 use crate::error::{ErrorType, IntoResult};
-use crate::model::{Amount, AutoCatUpdates, CategoryUpdates, TransactionUpdates};
+use crate::model::{Amount, AutoCatUpdates, CategoryUpdates, Date, TransactionUpdates};
 use crate::utils;
 use crate::Result;
 use anyhow::anyhow;
@@ -720,7 +720,7 @@ pub struct InsertTransactionArgs {
     /// The posted date (when the transaction cleared) or transaction date (when the transaction
     /// occurred). Posted date takes priority except for investment accounts. **Required.**
     #[arg(long)]
-    pub date: String,
+    pub date: Date,
 
     /// Transaction value where income and credits are positive; expenses and debits are negative.
     /// **Required.**
@@ -751,12 +751,12 @@ pub struct InsertTransactionArgs {
     /// First day of the transaction's month, useful for pivot tables and reporting.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[arg(long)]
-    pub month: Option<String>,
+    pub month: Option<Date>,
 
     /// Sunday date of the transaction's week for weekly breakdowns.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[arg(long)]
-    pub week: Option<String>,
+    pub week: Option<Date>,
 
     /// Unmodified merchant details directly from your bank, including codes and numbers.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -777,7 +777,7 @@ pub struct InsertTransactionArgs {
     /// When the transaction was added to the spreadsheet.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[arg(long)]
-    pub date_added: Option<String>,
+    pub date_added: Option<Date>,
 
     /// Normalized merchant name standardizing variants (e.g., "Amazon" for multiple Amazon
     /// formats). Optional automated column.
@@ -811,7 +811,7 @@ pub struct InsertTransactionArgs {
     /// column.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[arg(long)]
-    pub categorized_date: Option<String>,
+    pub categorized_date: Option<Date>,
 
     /// For reconciling transactions to bank statements. Google Sheets Add-on column.
     #[serde(skip_serializing_if = "Option::is_none")]

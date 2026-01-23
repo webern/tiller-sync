@@ -1,6 +1,6 @@
 use crate::error::Res;
 use crate::model::items::{Item, Items};
-use crate::model::Amount;
+use crate::model::{Amount, Date, DateCanBeEmptyStr, DateFromOptStr};
 use crate::utils;
 use anyhow::bail;
 use clap::Parser;
@@ -26,7 +26,7 @@ pub struct Transaction {
 
     /// The posted date (when the transaction cleared) or transaction date (when the transaction
     /// occurred). Posted date takes priority except for investment accounts.
-    pub(crate) date: String,
+    pub(crate) date: Date,
 
     /// Cleaned-up merchant information from your bank.
     pub(crate) description: String,
@@ -45,10 +45,10 @@ pub struct Transaction {
     pub(crate) institution: String,
 
     /// First day of the transaction's month, useful for pivot tables and reporting.
-    pub(crate) month: String,
+    pub(crate) month: Option<Date>,
 
     /// Sunday date of the transaction's week for weekly breakdowns.
-    pub(crate) week: String,
+    pub(crate) week: Option<Date>,
 
     /// Unmodified merchant details directly from your bank, including codes and numbers.
     pub(crate) full_description: String,
@@ -61,7 +61,7 @@ pub struct Transaction {
     pub(crate) check_number: String,
 
     /// When the transaction was added to the spreadsheet.
-    pub(crate) date_added: String,
+    pub(crate) date_added: Option<Date>,
 
     /// Normalized merchant name standardizing variants (e.g., "Amazon" for multiple Amazon
     /// formats). Optional automated column.
@@ -83,7 +83,7 @@ pub struct Transaction {
 
     /// Date when AutoCat automatically categorized or updated a transaction. Google Sheets Add-on
     /// column.
-    pub(crate) categorized_date: String,
+    pub(crate) categorized_date: Option<Date>,
 
     /// For reconciling transactions to bank statements. Google Sheets Add-on column.
     pub(crate) statement: String,
@@ -115,24 +115,26 @@ impl Item for Transaction {
         match TransactionColumn::from_header(header) {
             Ok(col) => match col {
                 TransactionColumn::TransactionId => self.transaction_id = value,
-                TransactionColumn::Date => self.date = value,
+                TransactionColumn::Date => self.date = Date::parse(value)?,
                 TransactionColumn::Description => self.description = value,
                 TransactionColumn::Amount => self.amount = Amount::from_str(&value)?,
                 TransactionColumn::Account => self.account = value,
                 TransactionColumn::AccountNumber => self.account_number = value,
                 TransactionColumn::Institution => self.institution = value,
-                TransactionColumn::Month => self.month = value,
-                TransactionColumn::Week => self.week = value,
+                TransactionColumn::Month => self.month = value.date_from_opt_s()?,
+                TransactionColumn::Week => self.week = value.date_from_opt_s()?,
                 TransactionColumn::FullDescription => self.full_description = value,
                 TransactionColumn::AccountId => self.account_id = value,
                 TransactionColumn::CheckNumber => self.check_number = value,
-                TransactionColumn::DateAdded => self.date_added = value,
+                TransactionColumn::DateAdded => self.date_added = value.date_from_opt_s()?,
                 TransactionColumn::MerchantName => self.merchant_name = value,
                 TransactionColumn::CategoryHint => self.category_hint = value,
                 TransactionColumn::Category => self.category = value,
                 TransactionColumn::Note => self.note = value,
                 TransactionColumn::Tags => self.tags = value,
-                TransactionColumn::CategorizedDate => self.categorized_date = value,
+                TransactionColumn::CategorizedDate => {
+                    self.categorized_date = value.date_from_opt_s()?
+                }
                 TransactionColumn::Statement => self.statement = value,
                 TransactionColumn::Metadata => self.metadata = value,
                 TransactionColumn::NoName => self.no_name = value,
@@ -150,24 +152,24 @@ impl Item for Transaction {
         match TransactionColumn::from_header(header) {
             Ok(col) => match col {
                 TransactionColumn::TransactionId => self.transaction_id.clone(),
-                TransactionColumn::Date => self.date.clone(),
+                TransactionColumn::Date => self.date.to_string(),
                 TransactionColumn::Description => self.description.clone(),
                 TransactionColumn::Amount => self.amount.to_string(),
                 TransactionColumn::Account => self.account.clone(),
                 TransactionColumn::AccountNumber => self.account_number.clone(),
                 TransactionColumn::Institution => self.institution.clone(),
-                TransactionColumn::Month => self.month.clone(),
-                TransactionColumn::Week => self.week.clone(),
+                TransactionColumn::Month => self.month.date_to_s(),
+                TransactionColumn::Week => self.week.date_to_s(),
                 TransactionColumn::FullDescription => self.full_description.clone(),
                 TransactionColumn::AccountId => self.account_id.clone(),
                 TransactionColumn::CheckNumber => self.check_number.clone(),
-                TransactionColumn::DateAdded => self.date_added.clone(),
+                TransactionColumn::DateAdded => self.date_added.date_to_s(),
                 TransactionColumn::MerchantName => self.merchant_name.clone(),
                 TransactionColumn::CategoryHint => self.category_hint.clone(),
                 TransactionColumn::Category => self.category.clone(),
                 TransactionColumn::Note => self.note.clone(),
                 TransactionColumn::Tags => self.tags.clone(),
-                TransactionColumn::CategorizedDate => self.categorized_date.clone(),
+                TransactionColumn::CategorizedDate => self.categorized_date.date_to_s(),
                 TransactionColumn::Statement => self.statement.clone(),
                 TransactionColumn::Metadata => self.metadata.clone(),
                 TransactionColumn::NoName => self.no_name.clone(),
@@ -207,10 +209,10 @@ impl Transaction {
             self.institution = x;
         }
         if let Some(x) = update.month {
-            self.month = x;
+            self.month = Some(x);
         }
         if let Some(x) = update.week {
-            self.week = x;
+            self.week = Some(x);
         }
         if let Some(x) = update.full_description {
             self.full_description = x;
@@ -222,7 +224,7 @@ impl Transaction {
             self.check_number = x;
         }
         if let Some(x) = update.date_added {
-            self.date_added = x;
+            self.date_added = Some(x);
         }
         if let Some(x) = update.merchant_name {
             self.merchant_name = x;
@@ -240,7 +242,7 @@ impl Transaction {
             self.tags = x;
         }
         if let Some(x) = update.categorized_date {
-            self.categorized_date = x;
+            self.categorized_date = Some(x);
         }
         if let Some(x) = update.statement {
             self.statement = x;
@@ -410,7 +412,7 @@ pub struct TransactionUpdates {
     /// occurred). Posted date takes priority except for investment accounts.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[arg(long)]
-    pub date: Option<String>,
+    pub date: Option<Date>,
 
     /// Cleaned-up merchant information from your bank.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -441,12 +443,12 @@ pub struct TransactionUpdates {
     /// First day of the transaction's month, useful for pivot tables and reporting.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[arg(long)]
-    pub month: Option<String>,
+    pub month: Option<Date>,
 
     /// Sunday date of the transaction's week for weekly breakdowns.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[arg(long)]
-    pub week: Option<String>,
+    pub week: Option<Date>,
 
     /// Unmodified merchant details directly from your bank, including codes and numbers.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -467,7 +469,7 @@ pub struct TransactionUpdates {
     /// When the transaction was added to the spreadsheet.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[arg(long)]
-    pub date_added: Option<String>,
+    pub date_added: Option<Date>,
 
     /// Normalized merchant name standardizing variants (e.g., "Amazon" for multiple Amazon
     /// formats). Optional automated column.
@@ -501,7 +503,7 @@ pub struct TransactionUpdates {
     /// column.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[arg(long)]
-    pub categorized_date: Option<String>,
+    pub categorized_date: Option<Date>,
 
     /// For reconciling transactions to bank statements. Google Sheets Add-on column.
     #[serde(skip_serializing_if = "Option::is_none")]

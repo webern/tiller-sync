@@ -2,6 +2,7 @@
 mod amount;
 mod auto_cat;
 mod category;
+mod date;
 mod items;
 mod mapping;
 mod row_col;
@@ -10,6 +11,8 @@ mod transaction;
 pub use amount::{Amount, AmountFormat};
 pub use auto_cat::{AutoCat, AutoCatUpdates, AutoCats};
 pub use category::{Categories, Category, CategoryUpdates};
+pub use date::Date;
+pub(crate) use date::{DateCanBeEmptyStr, DateFromOpt, DateFromOptStr};
 pub(crate) use items::Item;
 pub(crate) use mapping::Mapping;
 pub(crate) use row_col::RowCol;
