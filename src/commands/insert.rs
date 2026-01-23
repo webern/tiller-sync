@@ -44,18 +44,18 @@ pub async fn insert_transaction(
         account: args.account.unwrap_or_default(),
         account_number: args.account_number.unwrap_or_default(),
         institution: args.institution.unwrap_or_default(),
-        month: args.month.unwrap_or_default(),
-        week: args.week.unwrap_or_default(),
+        month: args.month,
+        week: args.week,
         full_description: args.full_description.unwrap_or_default(),
         account_id: args.account_id.unwrap_or_default(),
         check_number: args.check_number.unwrap_or_default(),
-        date_added: args.date_added.unwrap_or_default(),
+        date_added: args.date_added,
         merchant_name: args.merchant_name.unwrap_or_default(),
         category_hint: args.category_hint.unwrap_or_default(),
         category: args.category.clone().unwrap_or_default(),
         note: args.note.unwrap_or_default(),
         tags: args.tags.unwrap_or_default(),
-        categorized_date: args.categorized_date.unwrap_or_default(),
+        categorized_date: args.categorized_date,
         statement: args.statement.unwrap_or_default(),
         metadata: args.metadata.unwrap_or_default(),
         no_name: String::new(),
@@ -212,7 +212,7 @@ mod tests {
         let env = TestEnv::new().await;
 
         let args = InsertTransactionArgs {
-            date: "2025-01-20".to_string(),
+            date: "2025-01-20".try_into().unwrap(),
             amount: Amount::new(rust_decimal::Decimal::new(-1250, 2)), // -12.50
             description: Some("Test Purchase".to_string()),
             account: Some("Checking".to_string()),
@@ -253,7 +253,7 @@ mod tests {
         let txn = env.config().db()._get_transaction(id).await.unwrap();
         assert!(txn.is_some());
         let txn = txn.unwrap();
-        assert_eq!(txn.date, "2025-01-20");
+        assert_eq!(txn.date, "2025-01-20".try_into().unwrap());
         assert_eq!(txn.description, "Test Purchase");
         assert_eq!(txn.note, "Test note");
     }
@@ -265,7 +265,7 @@ mod tests {
         env.insert_test_transaction("temp-txn").await;
 
         let args = InsertTransactionArgs {
-            date: "2025-01-20".to_string(),
+            date: "2025-01-20".try_into().unwrap(),
             amount: Amount::new(rust_decimal::Decimal::new(-500, 2)), // -5.00
             description: Some("Coffee".to_string()),
             account: None,
@@ -310,7 +310,7 @@ mod tests {
         let env = TestEnv::new().await;
 
         let args = InsertTransactionArgs {
-            date: "2025-01-20".to_string(),
+            date: "2025-01-20".try_into().unwrap(),
             amount: Amount::new(rust_decimal::Decimal::new(-500, 2)),
             description: Some("Test".to_string()),
             account: None,
@@ -349,7 +349,7 @@ mod tests {
         let env = TestEnv::new().await;
 
         let make_args = || InsertTransactionArgs {
-            date: "2025-01-20".to_string(),
+            date: "2025-01-20".try_into().unwrap(),
             amount: Amount::new(rust_decimal::Decimal::new(-100, 2)),
             description: None,
             account: None,
@@ -389,7 +389,7 @@ mod tests {
 
         // Only required fields: date and amount
         let args = InsertTransactionArgs {
-            date: "2025-01-20".to_string(),
+            date: "2025-01-20".try_into().unwrap(),
             amount: Amount::new(rust_decimal::Decimal::new(10000, 2)), // 100.00 (positive = income)
             description: None,
             account: None,
@@ -426,7 +426,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(txn.date, "2025-01-20");
+        assert_eq!(txn.date, "2025-01-20".try_into().unwrap());
         assert_eq!(txn.description, "");
         assert_eq!(txn.account, "");
     }
