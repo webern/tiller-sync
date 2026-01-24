@@ -645,6 +645,19 @@ mod tests {
             history
         );
 
+        // Verify dates are written in US format (M/D/YYYY), not ISO format
+        if let Some(SheetCall::WriteRanges { ranges }) = write_calls.first() {
+            // Find the Transactions sheet data
+            if let Some((_, rows)) = ranges.iter().find(|(r, _)| r.contains("Transactions")) {
+                // Row 0 is header, row 1 is first data row. Column 1 is "Date"
+                let date_value = &rows[1][1];
+                assert!(
+                    date_value.contains('/'),
+                    "Date should be in US format (M/D/YYYY), got: {date_value}"
+                );
+            }
+        }
+
         // Verify clear happens before write
         let clear_idx = history
             .iter()
@@ -729,5 +742,67 @@ mod tests {
             "Error should mention formulas and suggest --formulas preserve or ignore, got: {}",
             err_msg
         );
+    }
+
+    #[tokio::test]
+    async fn test_sync_roundtrip_preserves_data() {
+        let env = TestEnv::new().await;
+        let config = env.config();
+
+        // Run sync_down to populate the database (this also seeds the TestSheet)
+        sync_down(config.clone(), Mode::Testing).await.unwrap();
+
+        // Capture original sheet state after sync_down (seed data is now loaded)
+        let test_sheet = TestSheet::new(config.spreadsheet_id());
+        let original_state = test_sheet.get_state();
+
+        // Clear history and run sync_up
+        test_sheet.clear_history();
+        sync_up(config.clone(), Mode::Testing, false, FormulasMode::Ignore)
+            .await
+            .unwrap();
+
+        // Get the data that was written during sync_up
+        let history = test_sheet.call_history();
+        let write_call = history
+            .iter()
+            .find(|c| matches!(c, SheetCall::WriteRanges { .. }))
+            .expect("sync_up should write data");
+
+        if let SheetCall::WriteRanges { ranges } = write_call {
+            // Compare Transactions data
+            let (_, written_transactions) = ranges
+                .iter()
+                .find(|(r, _)| r.contains("Transactions"))
+                .expect("Should write Transactions");
+            let original_transactions = original_state
+                .data
+                .get("Transactions")
+                .expect("Original should have Transactions");
+
+            // Compare row by row (both should have same number of rows)
+            assert_eq!(
+                written_transactions.len(),
+                original_transactions.len(),
+                "Transaction row count should match"
+            );
+
+            // Compare each cell value
+            for (row_idx, (written_row, original_row)) in written_transactions
+                .iter()
+                .zip(original_transactions.iter())
+                .enumerate()
+            {
+                for (col_idx, (written_val, original_val)) in
+                    written_row.iter().zip(original_row.iter()).enumerate()
+                {
+                    assert_eq!(
+                        written_val, original_val,
+                        "Mismatch at row {row_idx}, col {col_idx}: \
+                         written '{written_val}' != original '{original_val}'"
+                    );
+                }
+            }
+        }
     }
 }
