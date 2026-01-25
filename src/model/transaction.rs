@@ -1,6 +1,7 @@
 use crate::error::Res;
+use crate::model::date::Y;
 use crate::model::items::{Item, Items};
-use crate::model::{Amount, Date, DateCanBeEmptyStr, DateFromOptStr};
+use crate::model::{Amount, Date, DateFromOptStr, DateToSheetStr};
 use crate::utils;
 use anyhow::bail;
 use clap::Parser;
@@ -152,24 +153,24 @@ impl Item for Transaction {
         match TransactionColumn::from_header(header) {
             Ok(col) => match col {
                 TransactionColumn::TransactionId => self.transaction_id.clone(),
-                TransactionColumn::Date => self.date.to_string(),
+                TransactionColumn::Date => self.date.d_to_s(Y::Y4),
                 TransactionColumn::Description => self.description.clone(),
                 TransactionColumn::Amount => self.amount.to_string(),
                 TransactionColumn::Account => self.account.clone(),
                 TransactionColumn::AccountNumber => self.account_number.clone(),
                 TransactionColumn::Institution => self.institution.clone(),
-                TransactionColumn::Month => self.month.date_to_s(),
-                TransactionColumn::Week => self.week.date_to_s(),
+                TransactionColumn::Month => self.month.d_to_s(Y::Y2),
+                TransactionColumn::Week => self.week.d_to_s(Y::Y2),
                 TransactionColumn::FullDescription => self.full_description.clone(),
                 TransactionColumn::AccountId => self.account_id.clone(),
                 TransactionColumn::CheckNumber => self.check_number.clone(),
-                TransactionColumn::DateAdded => self.date_added.date_to_s(),
+                TransactionColumn::DateAdded => self.date_added.d_to_s(Y::Y2),
                 TransactionColumn::MerchantName => self.merchant_name.clone(),
                 TransactionColumn::CategoryHint => self.category_hint.clone(),
                 TransactionColumn::Category => self.category.clone(),
                 TransactionColumn::Note => self.note.clone(),
                 TransactionColumn::Tags => self.tags.clone(),
-                TransactionColumn::CategorizedDate => self.categorized_date.date_to_s(),
+                TransactionColumn::CategorizedDate => self.categorized_date.d_to_s(Y::Y2),
                 TransactionColumn::Statement => self.statement.clone(),
                 TransactionColumn::Metadata => self.metadata.clone(),
                 TransactionColumn::NoName => self.no_name.clone(),
