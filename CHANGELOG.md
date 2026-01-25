@@ -7,6 +7,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [v0.2.1] - 2025-01-25
+
+### Fixed
+
+- Date parsing and sheet formatting improved for better round-trip preservation. [#28] fixed in
+  [#32] and [#33]
+
 ## [v0.2.0]
 
 ### Changed
@@ -41,7 +48,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 <!-- Tags -->
 
-[Unreleased]: https://github.com/webern/tiller-sync/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/webern/tiller-sync/compare/v0.2.1...HEAD
+[v0.2.1]: https://github.com/webern/tiller-sync/releases/tag/v0.2.1
 [v0.2.0]: https://github.com/webern/tiller-sync/releases/tag/v0.2.0
 [v0.1.1]: https://github.com/webern/tiller-sync/releases/tag/v0.1.1
 [v0.1.0]: https://github.com/webern/tiller-sync/releases/tag/v0.1.0
@@ -68,6 +76,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#23]: https://github.com/webern/tiller-sync/pull/23
 [#26]: https://github.com/webern/tiller-sync/pull/26
 [#29]: https://github.com/webern/tiller-sync/pull/29
+[#32]: https://github.com/webern/tiller-sync/pull/32
+[#33]: https://github.com/webern/tiller-sync/pull/33
 
 <!-- Issues -->
 [#24]: https://github.com/webern/tiller-sync/issues/24

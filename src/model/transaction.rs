@@ -170,7 +170,7 @@ impl Item for Transaction {
                 TransactionColumn::Category => self.category.clone(),
                 TransactionColumn::Note => self.note.clone(),
                 TransactionColumn::Tags => self.tags.clone(),
-                TransactionColumn::CategorizedDate => self.categorized_date.d_to_s(Y::Y2),
+                TransactionColumn::CategorizedDate => self.categorized_date.d_to_s(Y::Y4),
                 TransactionColumn::Statement => self.statement.clone(),
                 TransactionColumn::Metadata => self.metadata.clone(),
                 TransactionColumn::NoName => self.no_name.clone(),

@@ -449,28 +449,29 @@ fn load_csv(csv_data: &str) -> Res<SheetData> {
 
 /// Seed transaction data.
 /// Date column uses Y4 format (MM/DD/YYYY with leading zeros).
-/// Month, Week, DateAdded, CategorizedDate use Y2 format (M/D/YY without leading zeros).
+/// Month, Week, DateAdded use Y2 format (M/D/YY without leading zeros).
+/// CategorizedDate uses Y4 format (MM/DD/YYYY HH:MM:SS AM/PM with leading zeros).
 const TRANSACTION_DATA: &str = r##",Date,Description,Category,Amount,Account,Account #,Institution,Month,Week,Transaction ID,Account ID,Check Number,Full Description,Date Added,Categorized Date,Custom Column
-,10/20/2025,Whole Foods Market,Groceries,-$87.43,Credit Card 1,xxxx1234,Bank A,10/1/25,10/19/25,tx001a2b3c4d5e6f7g8h9i01,acct001a2b3c4d5e6f7g,,WHOLE FOODS MARKET,10/21/25,10/21/25 9:15:30 AM,87.43
-,10/19/2025,Starbucks #2847,Coffee Shops,-$6.75,Credit Card 1,xxxx1234,Bank A,10/1/25,10/19/25,tx001a2b3c4d5e6f7g8h9i02,acct001a2b3c4d5e6f7g,,STARBUCKS #2847,10/20/25,10/20/25 8:45:12 AM,6.75
-,10/18/2025,Shell Gas Station,Gas & Fuel,-$52.30,Credit Card 1,xxxx1234,Bank A,10/1/25,10/12/25,tx001a2b3c4d5e6f7g8h9i03,acct001a2b3c4d5e6f7g,,SHELL GAS STATION,10/19/25,10/19/25 7:22:45 AM,52.30
-,10/17/2025,Chipotle Mexican Grill,Restaurants,-$14.85,Credit Card 1,xxxx1234,Bank A,10/1/25,10/12/25,tx001a2b3c4d5e6f7g8h9i04,acct001a2b3c4d5e6f7g,,CHIPOTLE MEXICAN GRILL,10/18/25,10/18/25 12:35:20 PM,14.85
-,10/16/2025,PG&E Electric,Utilities,-$142.67,Checking 1,xxxx5678,Bank A,10/1/25,10/12/25,tx001a2b3c4d5e6f7g8h9i05,acct002a2b3c4d5e6f7g,,PG&E ELECTRIC,10/17/25,10/17/25 6:00:00 AM,142.67
-,10/15/2025,Trader Joe's #429,Groceries,-$63.21,Credit Card 1,xxxx1234,Bank A,10/1/25,10/12/25,tx001a2b3c4d5e6f7g8h9i06,acct001a2b3c4d5e6f7g,,TRADER JOE'S #429,10/16/25,10/16/25 4:18:33 PM,63.21
-,10/14/2025,Peet's Coffee & Tea,Coffee Shops,-$7.25,Credit Card 1,xxxx1234,Bank A,10/1/25,10/12/25,tx001a2b3c4d5e6f7g8h9i07,acct001a2b3c4d5e6f7g,,PEET'S COFFEE & TEA,10/15/25,10/15/25 9:22:18 AM,7.25
-,10/13/2025,Chevron Gas,Gas & Fuel,-$48.90,Credit Card 1,xxxx1234,Bank A,10/1/25,10/12/25,tx001a2b3c4d5e6f7g8h9i08,acct001a2b3c4d5e6f7g,,CHEVRON GAS,10/14/25,10/14/25 5:45:09 PM,48.90
-,10/12/2025,Panera Bread,Restaurants,-$12.40,Credit Card 1,xxxx1234,Bank A,10/1/25,10/12/25,tx001a2b3c4d5e6f7g8h9i09,acct001a2b3c4d5e6f7g,,PANERA BREAD,10/13/25,10/13/25 1:10:25 PM,12.40
-,10/11/2025,Comcast Internet,Utilities,-$89.99,Checking 1,xxxx5678,Bank A,10/1/25,10/5/25,tx001a2b3c4d5e6f7g8h9i10,acct002a2b3c4d5e6f7g,,COMCAST INTERNET,10/12/25,10/12/25 6:30:00 AM,89.99
-,10/10/2025,Safeway #1534,Groceries,-$95.82,Credit Card 1,xxxx1234,Bank A,10/1/25,10/5/25,tx001a2b3c4d5e6f7g8h9i11,acct001a2b3c4d5e6f7g,,SAFEWAY #1534,10/11/25,10/11/25 3:42:15 PM,95.82
-,10/09/2025,Blue Bottle Coffee,Coffee Shops,-$8.50,Credit Card 1,xxxx1234,Bank A,10/1/25,10/5/25,tx001a2b3c4d5e6f7g8h9i12,acct001a2b3c4d5e6f7g,,BLUE BOTTLE COFFEE,10/10/25,10/10/25 10:05:44 AM,8.50
-,10/08/2025,76 Gas Station,Gas & Fuel,-$55.20,Credit Card 1,xxxx1234,Bank A,10/1/25,10/5/25,tx001a2b3c4d5e6f7g8h9i13,acct001a2b3c4d5e6f7g,,76 GAS STATION,10/9/25,10/9/25 6:18:52 PM,55.20
-,10/07/2025,Olive Garden,Restaurants,-$42.30,Credit Card 1,xxxx1234,Bank A,10/1/25,10/5/25,tx001a2b3c4d5e6f7g8h9i14,acct001a2b3c4d5e6f7g,,OLIVE GARDEN,10/8/25,10/8/25 7:25:33 PM,42.30
-,10/06/2025,AT&T Wireless,Utilities,-$75.00,Checking 1,xxxx5678,Bank A,10/1/25,10/5/25,tx001a2b3c4d5e6f7g8h9i15,acct002a2b3c4d5e6f7g,,AT&T WIRELESS,10/7/25,10/7/25 6:00:00 AM,75.00
-,10/05/2025,Costco Wholesale,Groceries,-$118.56,Credit Card 1,xxxx1234,Bank A,10/1/25,10/5/25,tx001a2b3c4d5e6f7g8h9i16,acct001a2b3c4d5e6f7g,,COSTCO WHOLESALE,10/6/25,10/6/25 2:30:18 PM,118.56
-,10/04/2025,Starbucks #1923,Coffee Shops,-$5.95,Credit Card 1,xxxx1234,Bank A,10/1/25,9/28/25,tx001a2b3c4d5e6f7g8h9i17,acct001a2b3c4d5e6f7g,,STARBUCKS #1923,10/5/25,10/5/25 8:12:05 AM,5.95
-,10/03/2025,Shell Station #4521,Gas & Fuel,-$61.45,Credit Card 1,xxxx1234,Bank A,10/1/25,9/28/25,tx001a2b3c4d5e6f7g8h9i18,acct001a2b3c4d5e6f7g,,SHELL STATION #4521,10/4/25,10/4/25 4:55:22 PM,61.45
-,10/02/2025,In-N-Out Burger,Restaurants,-$9.75,Credit Card 1,xxxx1234,Bank A,10/1/25,9/28/25,tx001a2b3c4d5e6f7g8h9i19,acct001a2b3c4d5e6f7g,,IN-N-OUT BURGER,10/3/25,10/3/25 6:40:11 PM,9.75
-,10/01/2025,City Water District,,-$45.88,Checking 1,xxxx5678,Bank A,10/1/25,9/28/25,tx001a2b3c4d5e6f7g8h9i20,acct002a2b3c4d5e6f7g,,CITY WATER DISTRICT,10/2/25,10/2/25 6:00:00 AM,45.88
+,10/20/2025,Whole Foods Market,Groceries,-$87.43,Credit Card 1,xxxx1234,Bank A,10/1/25,10/19/25,tx001a2b3c4d5e6f7g8h9i01,acct001a2b3c4d5e6f7g,,WHOLE FOODS MARKET,10/21/25,10/21/2025 09:15:30 AM,87.43
+,10/19/2025,Starbucks #2847,Coffee Shops,-$6.75,Credit Card 1,xxxx1234,Bank A,10/1/25,10/19/25,tx001a2b3c4d5e6f7g8h9i02,acct001a2b3c4d5e6f7g,,STARBUCKS #2847,10/20/25,10/20/2025 08:45:12 AM,6.75
+,10/18/2025,Shell Gas Station,Gas & Fuel,-$52.30,Credit Card 1,xxxx1234,Bank A,10/1/25,10/12/25,tx001a2b3c4d5e6f7g8h9i03,acct001a2b3c4d5e6f7g,,SHELL GAS STATION,10/19/25,10/19/2025 07:22:45 AM,52.30
+,10/17/2025,Chipotle Mexican Grill,Restaurants,-$14.85,Credit Card 1,xxxx1234,Bank A,10/1/25,10/12/25,tx001a2b3c4d5e6f7g8h9i04,acct001a2b3c4d5e6f7g,,CHIPOTLE MEXICAN GRILL,10/18/25,10/18/2025 12:35:20 PM,14.85
+,10/16/2025,PG&E Electric,Utilities,-$142.67,Checking 1,xxxx5678,Bank A,10/1/25,10/12/25,tx001a2b3c4d5e6f7g8h9i05,acct002a2b3c4d5e6f7g,,PG&E ELECTRIC,10/17/25,10/17/2025 06:00:00 AM,142.67
+,10/15/2025,Trader Joe's #429,Groceries,-$63.21,Credit Card 1,xxxx1234,Bank A,10/1/25,10/12/25,tx001a2b3c4d5e6f7g8h9i06,acct001a2b3c4d5e6f7g,,TRADER JOE'S #429,10/16/25,10/16/2025 04:18:33 PM,63.21
+,10/14/2025,Peet's Coffee & Tea,Coffee Shops,-$7.25,Credit Card 1,xxxx1234,Bank A,10/1/25,10/12/25,tx001a2b3c4d5e6f7g8h9i07,acct001a2b3c4d5e6f7g,,PEET'S COFFEE & TEA,10/15/25,10/15/2025 09:22:18 AM,7.25
+,10/13/2025,Chevron Gas,Gas & Fuel,-$48.90,Credit Card 1,xxxx1234,Bank A,10/1/25,10/12/25,tx001a2b3c4d5e6f7g8h9i08,acct001a2b3c4d5e6f7g,,CHEVRON GAS,10/14/25,10/14/2025 05:45:09 PM,48.90
+,10/12/2025,Panera Bread,Restaurants,-$12.40,Credit Card 1,xxxx1234,Bank A,10/1/25,10/12/25,tx001a2b3c4d5e6f7g8h9i09,acct001a2b3c4d5e6f7g,,PANERA BREAD,10/13/25,10/13/2025 01:10:25 PM,12.40
+,10/11/2025,Comcast Internet,Utilities,-$89.99,Checking 1,xxxx5678,Bank A,10/1/25,10/5/25,tx001a2b3c4d5e6f7g8h9i10,acct002a2b3c4d5e6f7g,,COMCAST INTERNET,10/12/25,10/12/2025 06:30:00 AM,89.99
+,10/10/2025,Safeway #1534,Groceries,-$95.82,Credit Card 1,xxxx1234,Bank A,10/1/25,10/5/25,tx001a2b3c4d5e6f7g8h9i11,acct001a2b3c4d5e6f7g,,SAFEWAY #1534,10/11/25,10/11/2025 03:42:15 PM,95.82
+,10/09/2025,Blue Bottle Coffee,Coffee Shops,-$8.50,Credit Card 1,xxxx1234,Bank A,10/1/25,10/5/25,tx001a2b3c4d5e6f7g8h9i12,acct001a2b3c4d5e6f7g,,BLUE BOTTLE COFFEE,10/10/25,10/10/2025 10:05:44 AM,8.50
+,10/08/2025,76 Gas Station,Gas & Fuel,-$55.20,Credit Card 1,xxxx1234,Bank A,10/1/25,10/5/25,tx001a2b3c4d5e6f7g8h9i13,acct001a2b3c4d5e6f7g,,76 GAS STATION,10/9/25,10/09/2025 06:18:52 PM,55.20
+,10/07/2025,Olive Garden,Restaurants,-$42.30,Credit Card 1,xxxx1234,Bank A,10/1/25,10/5/25,tx001a2b3c4d5e6f7g8h9i14,acct001a2b3c4d5e6f7g,,OLIVE GARDEN,10/8/25,10/08/2025 07:25:33 PM,42.30
+,10/06/2025,AT&T Wireless,Utilities,-$75.00,Checking 1,xxxx5678,Bank A,10/1/25,10/5/25,tx001a2b3c4d5e6f7g8h9i15,acct002a2b3c4d5e6f7g,,AT&T WIRELESS,10/7/25,10/07/2025 06:00:00 AM,75.00
+,10/05/2025,Costco Wholesale,Groceries,-$118.56,Credit Card 1,xxxx1234,Bank A,10/1/25,10/5/25,tx001a2b3c4d5e6f7g8h9i16,acct001a2b3c4d5e6f7g,,COSTCO WHOLESALE,10/6/25,10/06/2025 02:30:18 PM,118.56
+,10/04/2025,Starbucks #1923,Coffee Shops,-$5.95,Credit Card 1,xxxx1234,Bank A,10/1/25,9/28/25,tx001a2b3c4d5e6f7g8h9i17,acct001a2b3c4d5e6f7g,,STARBUCKS #1923,10/5/25,10/05/2025 08:12:05 AM,5.95
+,10/03/2025,Shell Station #4521,Gas & Fuel,-$61.45,Credit Card 1,xxxx1234,Bank A,10/1/25,9/28/25,tx001a2b3c4d5e6f7g8h9i18,acct001a2b3c4d5e6f7g,,SHELL STATION #4521,10/4/25,10/04/2025 04:55:22 PM,61.45
+,10/02/2025,In-N-Out Burger,Restaurants,-$9.75,Credit Card 1,xxxx1234,Bank A,10/1/25,9/28/25,tx001a2b3c4d5e6f7g8h9i19,acct001a2b3c4d5e6f7g,,IN-N-OUT BURGER,10/3/25,10/03/2025 06:40:11 PM,9.75
+,10/01/2025,City Water District,,-$45.88,Checking 1,xxxx5678,Bank A,10/1/25,9/28/25,tx001a2b3c4d5e6f7g8h9i20,acct002a2b3c4d5e6f7g,,CITY WATER DISTRICT,10/2/25,10/02/2025 06:00:00 AM,45.88
 "##;
 
 /// Seed category data.
