@@ -1,8 +1,9 @@
 //! Implements the `Tiller` trait for interacting with Google sheet data from a tiller sheet.
 
-use crate::api::{Sheet, SheetRange, Tiller, AUTO_CAT, CATEGORIES, TRANSACTIONS};
+use crate::api::{Sheet, SheetRange, Tiller, WriteCounts, AUTO_CAT, CATEGORIES, TRANSACTIONS};
 use crate::error::Res;
 use crate::model::{AutoCats, Categories, TillerData, Transactions};
+use tracing::debug;
 
 /// Implements the `Tiller` trait for interacting with Google sheet data from a tiller sheet.
 pub(super) struct TillerImpl {
@@ -36,7 +37,11 @@ impl Tiller for TillerImpl {
         self.sheet.copy_spreadsheet(new_name).await
     }
 
-    async fn clear_and_write_data(&mut self, data: &TillerData) -> Res<()> {
+    async fn clear_and_write_data(
+        &mut self,
+        data: &TillerData,
+        preserve_formulas: bool,
+    ) -> Res<usize> {
         // Clear each tab entirely (headers and data)
         let clear_ranges = [
             &format!("{TRANSACTIONS}!A1:ZZ"),
@@ -47,36 +52,46 @@ impl Tiller for TillerImpl {
             .clear_ranges(&clear_ranges.map(|s| s.as_str()))
             .await?;
 
-        // Build write data for all three sheets (headers + data in one operation each)
+        // Build write data for all three sheets (headers + data in one operation each). Formulas
+        // are overlaid onto the same grid rather than written separately, so a single write carries
+        // both the values and the formulas and there is no window in which the sheet holds one but
+        // not the other.
         let mut write_data = Vec::new();
+        let mut formulas_written = 0;
 
-        // Transactions - all rows (header + data)
-        let txn_data = data.transactions.to_rows()?;
-        write_data.push(SheetRange {
-            range: format!("{TRANSACTIONS}!A1:ZZ"),
-            values: txn_data,
-        });
+        let tabs = [
+            (
+                TRANSACTIONS,
+                data.transactions.to_rows_for_write(preserve_formulas),
+            ),
+            (
+                CATEGORIES,
+                data.categories.to_rows_for_write(preserve_formulas),
+            ),
+            (
+                AUTO_CAT,
+                data.auto_cats.to_rows_for_write(preserve_formulas),
+            ),
+        ];
 
-        // Categories - all rows (header + data)
-        let cat_data = data.categories.to_rows()?;
-        write_data.push(SheetRange {
-            range: format!("{CATEGORIES}!A1:ZZ"),
-            values: cat_data,
-        });
-
-        // AutoCat - all rows (header + data)
-        let aut_data = data.auto_cats.to_rows()?;
-        write_data.push(SheetRange {
-            range: format!("{AUTO_CAT}!A1:ZZ"),
-            values: aut_data,
-        });
+        for (tab, rows) in tabs {
+            let (values, count) = rows?;
+            if preserve_formulas {
+                debug!("Writing {count} formulas to the {tab} tab");
+            }
+            formulas_written += count;
+            write_data.push(SheetRange {
+                range: format!("{tab}!A1:ZZ"),
+                values,
+            });
+        }
 
         self.sheet.write_ranges(&write_data).await?;
 
-        Ok(())
+        Ok(formulas_written)
     }
 
-    async fn verify_write(&mut self, expected: &TillerData) -> Res<(usize, usize, usize)> {
+    async fn verify_write(&mut self, expected: &TillerData) -> Res<WriteCounts> {
         use anyhow::bail;
 
         // Re-fetch data from sheets to verify row counts
@@ -86,35 +101,40 @@ impl Tiller for TillerImpl {
         let expected_cat = expected.categories.data().len();
         let expected_ac = expected.auto_cats.data().len();
 
-        let actual_txn = actual.transactions.data().len();
-        let actual_cat = actual.categories.data().len();
-        let actual_ac = actual.auto_cats.data().len();
+        let counts = WriteCounts {
+            transactions: actual.transactions.data().len(),
+            categories: actual.categories.data().len(),
+            auto_cats: actual.auto_cats.data().len(),
+            formulas: actual.transactions.formulas().len()
+                + actual.categories.formulas().len()
+                + actual.auto_cats.formulas().len(),
+        };
 
-        if actual_txn != expected_txn {
+        if counts.transactions != expected_txn {
             bail!(
                 "Verification failed: expected {} transactions, found {}",
                 expected_txn,
-                actual_txn
+                counts.transactions
             );
         }
 
-        if actual_cat != expected_cat {
+        if counts.categories != expected_cat {
             bail!(
                 "Verification failed: expected {} categories, found {}",
                 expected_cat,
-                actual_cat
+                counts.categories
             );
         }
 
-        if actual_ac != expected_ac {
+        if counts.auto_cats != expected_ac {
             bail!(
                 "Verification failed: expected {} autocat rules, found {}",
                 expected_ac,
-                actual_ac
+                counts.auto_cats
             );
         }
 
-        Ok((actual_txn, actual_cat, actual_ac))
+        Ok(counts)
     }
 }
 

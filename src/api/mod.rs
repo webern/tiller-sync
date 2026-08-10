@@ -132,11 +132,35 @@ pub trait Tiller {
 
     /// Clear and write data to the Google sheet.
     /// This clears all data rows (preserving headers) and writes new data.
-    async fn clear_and_write_data(&mut self, data: &TillerData) -> Res<()>;
+    ///
+    /// When `preserve_formulas` is true, the cell formulas captured during the last `sync down` are
+    /// laid back over the grid so that Sheets receives the formulas rather than their last computed
+    /// values. Writes use `ValueInputOption::UserEntered`, so the `=...` strings are re-parsed as
+    /// live formulas.
+    ///
+    /// Returns the number of formula cells written.
+    async fn clear_and_write_data(
+        &mut self,
+        data: &TillerData,
+        preserve_formulas: bool,
+    ) -> Res<usize>;
 
-    /// Verify that the write was successful by re-fetching row counts.
-    /// Returns the counts (transactions, categories, autocat) if verification passes.
-    async fn verify_write(&mut self, expected: &TillerData) -> Res<(usize, usize, usize)>;
+    /// Verify that the write was successful by re-fetching the sheet.
+    /// Returns the observed counts if verification passes.
+    async fn verify_write(&mut self, expected: &TillerData) -> Res<WriteCounts>;
+}
+
+/// What a `sync up` actually left behind in the Google sheet, read back after writing.
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub struct WriteCounts {
+    /// Rows in the Transactions tab.
+    pub transactions: usize,
+    /// Rows in the Categories tab.
+    pub categories: usize,
+    /// Rows in the AutoCat tab.
+    pub auto_cats: usize,
+    /// Cells across all three tabs that came back holding a formula.
+    pub formulas: usize,
 }
 
 #[tokio::test]

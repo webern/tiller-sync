@@ -16,6 +16,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Negative amounts can now be given as `--amount -12.34` instead of only `--amount=-12.34`.
 - Updating a transaction no longer clears its `original_order`, which had caused updated rows to be
   written to the bottom of the Transactions tab on the next `sync up`. [#40]
+- `sync up --formulas preserve` now actually writes formulas back to the sheet. It had been
+  identical to `--formulas ignore`, silently replacing every formula with its last computed value
+  while reporting success. [#35]
+
+### Added
+
+- `sync up` reports how many formulas were written and reads the sheet back to check that they
+  landed, warning if the counts disagree. [#35]
 
 ### Changed
 
@@ -97,6 +105,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 <!-- Issues -->
 [#24]: https://github.com/webern/tiller-sync/issues/24
 [#28]: https://github.com/webern/tiller-sync/issues/28
+[#35]: https://github.com/webern/tiller-sync/issues/35
 [#36]: https://github.com/webern/tiller-sync/issues/36
 [#40]: https://github.com/webern/tiller-sync/issues/40
 [#41]: https://github.com/webern/tiller-sync/issues/41

@@ -111,6 +111,11 @@ When `formulas=preserve`:
 
 - Formulas are written to their original (row, column) positions from the last `sync_down`
 - Row positions are tracked via the `original_order` field
+- Formulas go out in the same write as the values, so the sheet is never left holding one without
+  the other
+- A formula whose row was deleted locally is dropped rather than moved onto a different row
+- The success message reports how many formulas were written, and `sync_up` reads the sheet back to
+  check that they landed
 
 **Gap Detection:** If rows have been deleted locally, there will be gaps in `original_order`
 (e.g., 0, 1, 3 instead of 0, 1, 2). This means formula positions may be incorrect because the

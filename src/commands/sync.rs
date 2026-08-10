@@ -172,32 +172,52 @@ pub async fn sync_up(
     );
 
     // Execute batch clear and write to Google Sheet
-    tiller_client
-        .clear_and_write_data(&db_data)
+    let preserve_formulas = matches!(formulas_mode, FormulasMode::Preserve);
+    let formulas_written = tiller_client
+        .clear_and_write_data(&db_data, preserve_formulas)
         .await
         .pub_result(ErrorType::Sync)?;
 
-    // Verification - re-fetch row counts and compare
-    let (txn_count, cat_count, ac_count) = tiller_client
+    // Verification - re-fetch and compare against what we meant to write
+    let counts = tiller_client
         .verify_write(&db_data)
         .await
         .pub_result(ErrorType::Sync)?;
 
+    // Formula preservation used to fail silently, flattening every formula to its last computed
+    // value while still reporting success. Read the formulas back and say what actually landed.
+    let formula_summary = if preserve_formulas {
+        if counts.formulas != formulas_written {
+            warn!(
+                "Wrote {formulas_written} formulas but the sheet reports {}. A formula whose \
+                 result is identical to its own text cannot be told apart from a plain value, so a \
+                 small difference may be harmless. If formulas were lost, the pre-upload snapshot \
+                 at {} holds the previous contents of the sheet.",
+                counts.formulas,
+                pre_backup.display()
+            );
+        }
+        format!(", {formulas_written} formulas")
+    } else {
+        String::new()
+    };
+
     info!(
-        "Synced {} transactions, {} categories, {} autocat rules to sheet",
-        txn_count, cat_count, ac_count
+        "Synced {} transactions, {} categories, {} autocat rules{formula_summary} to sheet",
+        counts.transactions, counts.categories, counts.auto_cats
     );
 
     Ok(Out::new_message(format!(
-        "Synced {txn_count} transactions, {cat_count} categories, {ac_count} autocat rules \
+        "Synced {} transactions, {} categories, {} autocat rules{formula_summary} \
         from local datastore to sheet",
+        counts.transactions, counts.categories, counts.auto_cats
     )))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::{SheetCall, TestSheet, MODE_ENV};
+    use crate::api::{SheetCall, TestSheet, MODE_ENV, TRANSACTIONS};
     use crate::args::DeleteTransactionsArgs;
     use crate::test::TestEnv;
 
@@ -741,6 +761,163 @@ mod tests {
                 && (err_msg.contains("preserve") || err_msg.contains("ignore")),
             "Error should mention formulas and suggest --formulas preserve or ignore, got: {}",
             err_msg
+        );
+    }
+
+    /// `--formulas preserve` reported success while flattening every formula to its last computed
+    /// value: the mode was validated and then dropped on the floor before the write.
+    ///
+    /// See https://github.com/webern/tiller-sync/issues/35
+    #[tokio::test]
+    async fn test_sync_up_preserve_writes_formulas_to_the_sheet() {
+        let env = TestEnv::new().await;
+        let config = env.config();
+
+        sync_down(config.clone(), Mode::Testing).await.unwrap();
+
+        let db_data = config.db().get_tiller_data().await.unwrap();
+        let expected_formulas = db_data.transactions.formulas().clone();
+        assert!(
+            !expected_formulas.is_empty(),
+            "test precondition: the seed data should contain formulas"
+        );
+
+        let test_sheet = TestSheet::new(config.spreadsheet_id());
+        test_sheet.clear_history();
+
+        sync_up(config.clone(), Mode::Testing, false, FormulasMode::Preserve)
+            .await
+            .unwrap();
+
+        // Inspect what was actually sent to the sheet.
+        let history = test_sheet.call_history();
+        let SheetCall::WriteRanges { ranges } = history
+            .iter()
+            .find(|c| matches!(c, SheetCall::WriteRanges { .. }))
+            .expect("sync_up should write data")
+        else {
+            unreachable!("filtered on WriteRanges")
+        };
+        let (_, written) = ranges
+            .iter()
+            .find(|(r, _)| r.contains(TRANSACTIONS))
+            .expect("sync_up should write the Transactions tab");
+
+        for (row_col, formula) in &expected_formulas {
+            // +1 for the header row that to_rows prepends.
+            let cell = written
+                .get(row_col.row() + 1)
+                .and_then(|row| row.get(row_col.col()));
+            assert_eq!(
+                cell,
+                Some(formula),
+                "the formula at {row_col} should have been written back, not its computed value"
+            );
+        }
+
+        // And confirm it round-trips: reading the sheet again must find the same formulas.
+        let mut client = tiller(sheet(config.clone(), Mode::Testing).await.unwrap())
+            .await
+            .unwrap();
+        let from_sheet = client.get_data().await.unwrap();
+        assert_eq!(
+            from_sheet.transactions.formulas(),
+            &expected_formulas,
+            "formulas should still be live formulas after sync up"
+        );
+    }
+
+    /// With `--formulas ignore` the sheet should receive plain values, as it always has.
+    #[tokio::test]
+    async fn test_sync_up_ignore_writes_values_not_formulas() {
+        let env = TestEnv::new().await;
+        let config = env.config();
+
+        sync_down(config.clone(), Mode::Testing).await.unwrap();
+
+        let test_sheet = TestSheet::new(config.spreadsheet_id());
+        test_sheet.clear_history();
+
+        sync_up(config.clone(), Mode::Testing, false, FormulasMode::Ignore)
+            .await
+            .unwrap();
+
+        let history = test_sheet.call_history();
+        let SheetCall::WriteRanges { ranges } = history
+            .iter()
+            .find(|c| matches!(c, SheetCall::WriteRanges { .. }))
+            .expect("sync_up should write data")
+        else {
+            unreachable!("filtered on WriteRanges")
+        };
+
+        for (_, rows) in ranges {
+            for row in rows {
+                for cell in row {
+                    assert!(
+                        !cell.starts_with('='),
+                        "--formulas ignore should not write any formula, found: {cell}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The summary has to say how many formulas were written, so a silent loss cannot look like a
+    /// clean run again.
+    #[tokio::test]
+    async fn test_sync_up_reports_formula_count() {
+        let env = TestEnv::new().await;
+        let config = env.config();
+
+        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        let expected = config
+            .db()
+            .get_tiller_data()
+            .await
+            .unwrap()
+            .transactions
+            .formulas()
+            .len();
+
+        let out = sync_up(config.clone(), Mode::Testing, false, FormulasMode::Preserve)
+            .await
+            .unwrap();
+
+        assert!(
+            out.message().contains(&format!("{expected} formulas")),
+            "the summary should report the formula count, got: {}",
+            out.message()
+        );
+    }
+
+    /// A formula whose row was deleted locally has nowhere to go. It must be dropped rather than
+    /// landing on whichever row shifted up into its place.
+    #[tokio::test]
+    async fn test_sync_up_preserve_drops_formulas_for_deleted_rows() {
+        let env = TestEnv::new().await;
+        let config = env.config();
+
+        sync_down(config.clone(), Mode::Testing).await.unwrap();
+
+        // Delete the last transaction, so the formula bound to the final row has no row left.
+        let db = config.db();
+        let data = db.get_tiller_data().await.unwrap();
+        let total_formulas = data.transactions.formulas().len();
+        let last = data.transactions.data().last().unwrap();
+        let delete_args = DeleteTransactionsArgs::new(vec![&last.transaction_id]).unwrap();
+        db.delete_transactions(delete_args).await.unwrap();
+
+        // --force because deleting a row leaves a gap in original_order.
+        let out = sync_up(config.clone(), Mode::Testing, true, FormulasMode::Preserve)
+            .await
+            .unwrap();
+
+        assert!(
+            out.message()
+                .contains(&format!("{} formulas", total_formulas - 1)),
+            "the formula for the deleted row should be dropped, got: {}",
+            out.message()
         );
     }
 

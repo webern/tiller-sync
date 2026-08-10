@@ -11,6 +11,16 @@ impl RowCol {
     pub fn new(row: usize, col: usize) -> Self {
         Self(row, col)
     }
+
+    /// The 0-based row index, counted over data rows only (the header row is not included).
+    pub fn row(&self) -> usize {
+        self.0
+    }
+
+    /// The 0-based column index.
+    pub fn col(&self) -> usize {
+        self.1
+    }
 }
 
 impl fmt::Display for RowCol {
