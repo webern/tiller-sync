@@ -19,6 +19,7 @@ pub(super) use sheet_test_client::TestSheet;
 use std::env::VarError;
 
 use crate::error::{ErrorType, IntoResult, Res};
+use anyhow::Context;
 #[cfg(test)]
 pub(super) use sheet_test_client::{SheetCall, TestSheetState};
 
@@ -78,10 +79,20 @@ impl Mode {
 pub async fn sheet(config: Config, mode: Mode) -> Result<Box<dyn Sheet>> {
     let sheet_client: Box<dyn Sheet> = match mode {
         Mode::Google => {
+            // Credentials are only read here, when an operation actually needs the Google API.
+            // Nothing about starting the CLI or the MCP server touches them, and nothing outside
+            // `tiller auth` can start the interactive OAuth flow.
             let token_provider =
                 TokenProvider::load(config.client_secret_path(), config.token_path())
                     .await
-                    .pub_result(ErrorType::Config)?;
+                    .context(
+                        "Could not use the stored Google credentials. Someone needs to run \
+                         'tiller auth' in a terminal to re-authorize; it opens a browser and waits \
+                         for a person to approve, so it cannot be run unattended. If you are an \
+                         assistant working on the user's behalf, ask them to run it rather than \
+                         running it yourself.",
+                    )
+                    .pub_result(ErrorType::Auth)?;
             Box::new(
                 GoogleSheet::new(config.clone(), token_provider)
                     .await

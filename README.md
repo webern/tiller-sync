@@ -301,6 +301,12 @@ With Claude Code and Tiller Sync, you can:
 
 ## Troubleshooting
 
+### "'tiller auth' has to be run by a person at a terminal"
+
+`tiller auth` opens a browser and waits for you to authorize in it, so it cannot run from a script,
+a background process, or an AI agent's shell. Open a terminal and run it yourself. To check existing
+credentials without any browser interaction, use `tiller auth --verify`, which is safe to script.
+
 ### "Access token expired" or "Invalid credentials"
 
 Your OAuth token may have expired. Refresh it with:
