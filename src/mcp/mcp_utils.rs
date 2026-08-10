@@ -1,17 +1,17 @@
 use crate::commands::Out;
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, ContentBlock};
 use rmcp::ErrorData;
 use serde::Serialize;
 use std::fmt::Debug;
 use tracing::error;
 
-pub(super) fn to_content<T>(out: Out<T>) -> Vec<Content>
+pub(super) fn to_content<T>(out: Out<T>) -> Vec<ContentBlock>
 where
     T: Debug + Clone + Serialize,
 {
-    let mut content = vec![Content::text(out.message())];
+    let mut content = vec![ContentBlock::text(out.message())];
     if let Some(object) = out.structure() {
-        match Content::json(object) {
+        match ContentBlock::json(object) {
             Ok(json) => content.push(json),
             Err(e) => error!("Unable to serialize JSON output: {e}"),
         };
@@ -25,6 +25,6 @@ where
 {
     Ok(match result {
         Ok(out) => CallToolResult::success(to_content(out)),
-        Err(e) => CallToolResult::error(vec![Content::text(e.to_string())]),
+        Err(e) => CallToolResult::error(vec![ContentBlock::text(e.to_string())]),
     })
 }

@@ -41,9 +41,9 @@ impl TillerServer {
     async fn initialize_service(&self) -> Result<CallToolResult, McpError> {
         let mut initialized = self.initialized.lock().await;
         *initialized = true;
-        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
-            include_str!("docs/INSTRUCTIONS.md"),
-        )]))
+        Ok(CallToolResult::success(vec![
+            rmcp::model::ContentBlock::text(include_str!("docs/INSTRUCTIONS.md")),
+        ]))
     }
 
     /// Download Transactions, Categories, and AutoCat data from the configured Tiller Google
