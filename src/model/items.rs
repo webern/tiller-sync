@@ -247,6 +247,10 @@ where
         &self.data
     }
 
+    pub(crate) fn data_mut(&mut self) -> &mut Vec<I> {
+        &mut self.data
+    }
+
     pub fn mapping(&self) -> &Mapping {
         &self.mapping
     }

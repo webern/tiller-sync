@@ -54,6 +54,11 @@ const MIGRATIONS: &[Migration] = &[
         up: MigrationAction::Rust(migration_02_up),
         down: MigrationAction::Rust(migration_02_down),
     },
+    Migration {
+        version: 3,
+        up: MigrationAction::Sql(include_str!("migration_03_up.sql")),
+        down: MigrationAction::Sql(include_str!("migration_03_down.sql")),
+    },
 ];
 
 // ============================================================================
@@ -490,18 +495,19 @@ mod tests {
 
     #[test]
     fn testvalidate_migrations_succeeds_for_valid_range() {
-        // Migrations 1 and 2 exist, so this should succeed
-        assert!(validate_migrations(0, 1).is_ok());
-        assert!(validate_migrations(1, 0).is_ok());
-        assert!(validate_migrations(0, 2).is_ok());
-        assert!(validate_migrations(2, 0).is_ok());
+        // Every migration up to CURRENT_VERSION exists, in both directions.
+        for version in 1..=crate::db::CURRENT_VERSION {
+            assert!(validate_migrations(0, version).is_ok());
+            assert!(validate_migrations(version, 0).is_ok());
+        }
     }
 
     #[test]
     fn testvalidate_migrations_fails_for_missing_migration() {
-        // Migration 3 doesn't exist
-        assert!(validate_migrations(0, 3).is_err());
-        assert!(validate_migrations(2, 4).is_err());
+        // There is no migration beyond CURRENT_VERSION.
+        let beyond = crate::db::CURRENT_VERSION + 1;
+        assert!(validate_migrations(0, beyond).is_err());
+        assert!(validate_migrations(beyond, beyond + 1).is_err());
     }
 
     #[tokio::test]

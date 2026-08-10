@@ -505,6 +505,39 @@ struct TransactionId {
 - We will implement a `Default` function for this using the `uuid` crate that creates a `Local` ID.
 - We will implement Serialize and Deserialize
 
+##### Unusable IDs in real sheets
+
+`transactions.transaction_id` is the primary key, but real Tiller sheets routinely contain rows
+whose `Transaction ID` cannot serve as one:
+
+- **Blank.** Some feeds supply no ID at all. Apple Card is the well-known example and can account
+  for hundreds of rows in an ordinary sheet.
+- **Duplicated.** Malformed split markers such as `split:[1]` and `split:[2]` appear verbatim in the
+  column on every split row instead of referencing the parent transaction's ID.
+
+Neither case means the row is corrupt, so `sync down` does not refuse them. Every affected row is
+given a surrogate `user-` ID, and the sheet's own value is stored in `original_transaction_id`. That
+value is what `get_by_header` returns for the `Transaction ID` column, so `sync up` writes it back
+and the Transactions tab round-trips unchanged. A warning reports how many rows were affected and
+how to list them.
+
+A surrogate has to be **stable** across syncs, because `sync down` upserts on `transaction_id`: an
+ID that changed between syncs would make the row look deleted and re-added, discarding local edits.
+The surrogate is therefore `user-` followed by a 64-bit FNV-1a hash of the row's bank-supplied
+content — the sheet's ID value, date, amount, description, full description, account, and
+institution — plus the occurrence number within a group of otherwise-identical rows.
+
+- Position is deliberately **not** part of the hash: inserting a row above would re-key everything
+  below it.
+- Locally-editable fields such as `category` and `note` are deliberately **not** part of the hash:
+  categorizing a row would otherwise re-key it.
+- The amount contributes its **numeric value**, not its rendered string. An `Amount` keeps the
+  formatting it was parsed from, and reformatting the Amount column in the sheet does not change
+  what the row is.
+- FNV-1a is written out in `src/model/transaction_ids.rs` rather than taken from
+  `std::hash::DefaultHasher`, whose algorithm is explicitly allowed to change between Rust releases.
+  These hashes are persisted as primary keys, so the algorithm is part of the on-disk format.
+
 ## Database Schema
 
 The SQLite database contains the following tables. See `src/db/migrations/` for exact DDL.
@@ -513,10 +546,13 @@ The SQLite database contains the following tables. See `src/db/migrations/` for 
 
 **transactions** - Financial transactions from the Tiller Transactions sheet.
 
-- Primary key: `transaction_id` (Tiller-assigned or `user-` prefixed local UUID)
+- Primary key: `transaction_id` (Tiller-assigned, or a `user-` prefixed local ID)
 - Indexed on: `date`, `account`, `category`, `description`
 - Foreign key: `category` references `categories(category)` with `ON UPDATE CASCADE ON DELETE
   RESTRICT`
+- `original_transaction_id TEXT` - The sheet's own `Transaction ID` value, kept only when it could
+  not serve as a primary key because it was blank or duplicated. NULL otherwise. See Unusable IDs in
+  real sheets.
 
 **categories** - Budget categories from the Tiller Categories sheet.
 

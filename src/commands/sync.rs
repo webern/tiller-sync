@@ -763,6 +763,160 @@ mod tests {
         );
     }
 
+    /// Finds the 0-based index of a column in the test sheet's Transactions tab.
+    fn column_index(env: &TestEnv, header: &str) -> usize {
+        env.seed_sheet();
+        env.get_state().data[TRANSACTIONS][0]
+            .iter()
+            .position(|h| h == header)
+            .unwrap_or_else(|| panic!("the test sheet should have a {header} column"))
+    }
+
+    /// Rewrites the Transaction ID of the given data rows (0-based, excluding the header).
+    fn set_transaction_ids(env: &TestEnv, ids: &[(usize, &str)]) {
+        env.seed_sheet();
+        let col = column_index(env, "Transaction ID");
+        let mut state = env.get_state();
+        let rows = state.data.get_mut(TRANSACTIONS).unwrap();
+        for (data_row, id) in ids {
+            rows[data_row + 1][col] = id.to_string();
+        }
+        env.set_state(state);
+    }
+
+    /// `transactions.transaction_id` is a primary key, and real sheets violate uniqueness: some
+    /// feeds supply no ID at all, and malformed split markers repeat `split:[1]` across rows.
+    /// `sync down` used to abort on the first such row with a bare UNIQUE constraint error.
+    ///
+    /// See https://github.com/webern/tiller-sync/issues/37
+    #[tokio::test]
+    async fn test_sync_down_handles_blank_and_duplicate_ids() {
+        let env = TestEnv::new().await;
+        let config = env.config();
+
+        set_transaction_ids(
+            &env,
+            &[
+                (0, ""),
+                (1, ""),
+                (2, "split:[1]"),
+                (3, "split:[1]"),
+                (4, "split:[2]"),
+            ],
+        );
+
+        let out = sync_down(config.clone(), Mode::Testing)
+            .await
+            .expect("sync down must not abort on unusable Transaction IDs");
+        assert!(out.message().contains("20 transactions"), "no row was lost");
+
+        let data = config.db().get_tiller_data().await.unwrap();
+        let resolved: Vec<_> = data
+            .transactions
+            .data()
+            .iter()
+            .filter(|t| t.original_transaction_id.is_some())
+            .collect();
+
+        // Two blanks and the two rows sharing `split:[1]`. The lone `split:[2]` is unique, so it
+        // is left alone.
+        assert_eq!(resolved.len(), 4);
+        for transaction in &resolved {
+            assert!(
+                transaction.transaction_id.starts_with("user-"),
+                "an unusable ID should be replaced by a surrogate, got: {}",
+                transaction.transaction_id
+            );
+        }
+        assert!(data
+            .transactions
+            .data()
+            .iter()
+            .any(|t| t.transaction_id == "split:[2]" && t.original_transaction_id.is_none()));
+    }
+
+    /// A second `sync down` must recognize the same rows rather than deleting and re-adding them,
+    /// which would discard any local edits made to them.
+    #[tokio::test]
+    async fn test_repeated_sync_down_keeps_the_same_surrogates() {
+        let env = TestEnv::new().await;
+        let config = env.config();
+
+        set_transaction_ids(&env, &[(0, ""), (1, "")]);
+        sync_down(config.clone(), Mode::Testing).await.unwrap();
+
+        let first: Vec<String> = config
+            .db()
+            .get_tiller_data()
+            .await
+            .unwrap()
+            .transactions
+            .data()
+            .iter()
+            .map(|t| t.transaction_id.clone())
+            .collect();
+
+        sync_down(config.clone(), Mode::Testing).await.unwrap();
+
+        let second: Vec<String> = config
+            .db()
+            .get_tiller_data()
+            .await
+            .unwrap()
+            .transactions
+            .data()
+            .iter()
+            .map(|t| t.transaction_id.clone())
+            .collect();
+
+        assert_eq!(
+            first, second,
+            "surrogate IDs must be stable, or every sync would re-key the row and lose local edits"
+        );
+    }
+
+    /// The surrogate is a local convenience. The sheet must get its own values back.
+    #[tokio::test]
+    async fn test_sync_up_writes_the_original_ids_back() {
+        let env = TestEnv::new().await;
+        let config = env.config();
+
+        set_transaction_ids(&env, &[(0, ""), (1, "split:[1]"), (2, "split:[1]")]);
+        sync_down(config.clone(), Mode::Testing).await.unwrap();
+
+        let test_sheet = TestSheet::new(config.spreadsheet_id());
+        test_sheet.clear_history();
+
+        sync_up(config.clone(), Mode::Testing, false, FormulasMode::Ignore)
+            .await
+            .unwrap();
+
+        let history = test_sheet.call_history();
+        let SheetCall::WriteRanges { ranges } = history
+            .iter()
+            .find(|c| matches!(c, SheetCall::WriteRanges { .. }))
+            .expect("sync_up should write data")
+        else {
+            unreachable!("filtered on WriteRanges")
+        };
+        let (_, written) = ranges
+            .iter()
+            .find(|(r, _)| r.contains(TRANSACTIONS))
+            .expect("sync_up should write the Transactions tab");
+
+        let col = column_index(&env, "Transaction ID");
+        assert_eq!(written[1][col], "", "a blank ID must stay blank");
+        assert_eq!(written[2][col], "split:[1]");
+        assert_eq!(written[3][col], "split:[1]");
+        for row in written.iter().skip(1) {
+            assert!(
+                !row[col].starts_with("user-"),
+                "a surrogate ID must never be written into the sheet, found: {}",
+                row[col]
+            );
+        }
+    }
+
     /// `--formulas preserve` now actually preserves formulas.
     ///
     /// See https://github.com/webern/tiller-sync/issues/35

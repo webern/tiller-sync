@@ -2,7 +2,7 @@
 
 use crate::api::{Sheet, SheetRange, Tiller, WriteCounts, AUTO_CAT, CATEGORIES, TRANSACTIONS};
 use crate::error::Res;
-use crate::model::{AutoCats, Categories, TillerData, Transactions};
+use crate::model::{resolve_transaction_ids, AutoCats, Categories, TillerData, Transactions};
 use tracing::debug;
 
 /// Implements the `Tiller` trait for interacting with Google sheet data from a tiller sheet.
@@ -142,7 +142,14 @@ impl Tiller for TillerImpl {
 async fn fetch_transactions(client: &mut (dyn Sheet + Send)) -> Res<Transactions> {
     let values = client.get(TRANSACTIONS).await?;
     let formulas = client.get_formulas(TRANSACTIONS).await?;
-    Transactions::parse(values, formulas)
+    let mut transactions = Transactions::parse(values, formulas)?;
+
+    // Rows whose Transaction ID is blank or duplicated cannot be keyed on that value. Resolving
+    // here rather than in the sync commands means every read of the sheet is normalized the same
+    // way, so the conflict-detection snapshot and the verification read-back stay comparable.
+    resolve_transaction_ids(&mut transactions).log();
+
+    Ok(transactions)
 }
 
 /// Fetches category data from the Categories tab

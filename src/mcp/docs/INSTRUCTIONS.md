@@ -58,6 +58,11 @@ Downloads data from the Google Sheet to the local SQLite database.
 - Categories and AutoCat are fully replaced
 - Cell formulas are captured and stored for optional preservation during `sync_up`
 - Each row's `original_order` is recorded for formula position tracking
+- Rows whose `Transaction ID` is blank or duplicated in the sheet are given a surrogate `user-` ID
+  so they can be keyed locally. Their sheet value is kept in `original_transaction_id` and written
+  back unchanged on `sync_up`. To find them:
+  `SELECT original_transaction_id, transaction_id, date, description FROM transactions WHERE
+  original_transaction_id IS NOT NULL`
 
 **Caution:** This overwrites local changes. The SQLite backup enables manual recovery if needed.
 
@@ -246,6 +251,7 @@ Retrieves database schema information to help understand the data structure.
 | Column           | Type    | Description                                          |
 |------------------|---------|------------------------------------------------------|
 | `transaction_id` | TEXT    | Unique ID (Tiller-assigned or `user-` prefixed)      |
+| `original_transaction_id` | TEXT | The sheet's own ID when it was blank or duplicated; NULL otherwise |
 | `date`           | TEXT    | Transaction date (YYYY-MM-DD)                        |
 | `description`    | TEXT    | Cleaned merchant description                         |
 | `amount`         | TEXT    | Transaction amount (negative = expense)              |

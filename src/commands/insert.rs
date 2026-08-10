@@ -61,6 +61,9 @@ pub async fn insert_transaction(
         no_name: String::new(),
         other_fields: utils::other_fields_map(args.other_fields),
         original_order: None, // Locally-added rows have no original order
+        // The generated ID is the ID we write to the sheet, so there is no separate sheet value to
+        // preserve.
+        original_transaction_id: None,
     };
 
     // Insert into database

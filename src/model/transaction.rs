@@ -102,6 +102,15 @@ pub struct Transaction {
     /// Used for formula preservation during sync up.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) original_order: Option<u64>,
+
+    /// The Transaction ID exactly as it appeared in the sheet, kept only when that value could not
+    /// serve as a primary key because it was blank or duplicated. In that case `transaction_id`
+    /// holds a surrogate `user-` ID and this field holds the sheet's value, which is what gets
+    /// written back on sync up so the sheet round-trips unchanged.
+    ///
+    /// None in the ordinary case, where `transaction_id` is the sheet's own value.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) original_transaction_id: Option<String>,
 }
 
 impl Item for Transaction {
@@ -152,7 +161,12 @@ impl Item for Transaction {
     fn get_by_header(&self, header: &str) -> String {
         match TransactionColumn::from_header(header) {
             Ok(col) => match col {
-                TransactionColumn::TransactionId => self.transaction_id.clone(),
+                // A row whose sheet value could not be a primary key was given a surrogate. Write
+                // the sheet's own value back so the Transactions tab round-trips unchanged.
+                TransactionColumn::TransactionId => self
+                    .original_transaction_id
+                    .clone()
+                    .unwrap_or_else(|| self.transaction_id.clone()),
                 TransactionColumn::Date => self.date.d_to_s(Y::Y4),
                 TransactionColumn::Description => self.description.clone(),
                 TransactionColumn::Amount => self.amount.to_string(),

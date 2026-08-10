@@ -52,6 +52,14 @@ impl TestEnv {
         self.config.clone()
     }
 
+    /// Loads the seed data into the TestSheet associated with this environment.
+    ///
+    /// The sheet is normally seeded the first time a sync reaches for it. Call this when a test
+    /// needs to look at or edit the sheet before any sync has run.
+    pub fn seed_sheet(&self) {
+        let _ = TestSheet::new_with_seed_data(self.config.spreadsheet_id());
+    }
+
     /// Gets the current state of the TestSheet associated with this environment.
     pub fn get_state(&self) -> TestSheetState {
         let test_sheet = TestSheet::new(self.config.spreadsheet_id());

@@ -19,6 +19,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `sync up --formulas preserve` now actually writes formulas back to the sheet. It had been
   identical to `--formulas ignore`, silently replacing every formula with its last computed value
   while reporting success. [#35]
+- `sync down` no longer aborts on rows whose `Transaction ID` is blank or duplicated, which is
+  common in real sheets. Such rows are given a stable surrogate `user-` ID for local use, and the
+  sheet's own value is written back unchanged on `sync up`. [#37]
 
 ### Added
 
@@ -110,5 +113,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#28]: https://github.com/webern/tiller-sync/issues/28
 [#35]: https://github.com/webern/tiller-sync/issues/35
 [#36]: https://github.com/webern/tiller-sync/issues/36
+[#37]: https://github.com/webern/tiller-sync/issues/37
 [#40]: https://github.com/webern/tiller-sync/issues/40
 [#41]: https://github.com/webern/tiller-sync/issues/41

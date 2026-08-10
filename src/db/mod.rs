@@ -24,7 +24,7 @@ use std::str::FromStr;
 
 /// The target schema version for the database. This equals the highest migration number available.
 /// When `migration_05_up.sql` is the highest numbered migration, this should be `5`.
-pub(crate) const CURRENT_VERSION: i32 = 2;
+pub(crate) const CURRENT_VERSION: i32 = 3;
 
 /// Represents a row in the database in a table for which the primary key is not known in
 /// `TillerData`. Namely, rows from the `categories` and `autocats` tables.
@@ -290,7 +290,8 @@ impl Db {
                 transaction_id, date, description, amount, account, account_number,
                 institution, month, week, full_description, account_id, check_number,
                 date_added, merchant_name, category_hint, category, note, tags,
-                categorized_date, statement, metadata, other_fields, original_order
+                categorized_date, statement, metadata, other_fields, original_order,
+                original_transaction_id
             FROM transactions ORDER BY original_order ASC NULLS LAST, transaction_id ASC"#,
         )
         .fetch_all(&self.pool)
@@ -343,7 +344,10 @@ impl Db {
                 metadata: r.get::<Option<String>, _>("metadata").unwrap_or_default(),
                 other_fields,
                 original_order: r.get::<Option<u64>, _>("original_order"),
-                ..Default::default()
+                original_transaction_id: r.get::<Option<String>, _>("original_transaction_id"),
+                // `no_name` (the unnamed column A that some sheets have) has no column in the
+                // `transactions` table, so there is nothing to read it from.
+                no_name: String::new(),
             });
         }
 
@@ -555,7 +559,8 @@ impl Db {
                 institution = ?, month = ?, week = ?, full_description = ?, account_id = ?,
                 check_number = ?, date_added = ?, merchant_name = ?, category_hint = ?,
                 category = ?, note = ?, tags = ?, categorized_date = ?, statement = ?,
-                metadata = ?, other_fields = ?, original_order = ?
+                metadata = ?, other_fields = ?, original_order = ?,
+                original_transaction_id = ?
             WHERE transaction_id = ?"#,
         )
         .bind(&txn.date)
@@ -580,6 +585,7 @@ impl Db {
         .bind(&txn.metadata)
         .bind(&other_fields_json)
         .bind(txn.original_order.map(|i| i as i64))
+        .bind(&txn.original_transaction_id)
         .bind(&txn.transaction_id)
         .execute(executor)
         .await
@@ -606,7 +612,8 @@ impl Db {
                 transaction_id, date, description, amount, account, account_number,
                 institution, month, week, full_description, account_id, check_number,
                 date_added, merchant_name, category_hint, category, note, tags,
-                categorized_date, statement, metadata, other_fields, original_order
+                categorized_date, statement, metadata, other_fields, original_order,
+                original_transaction_id
             FROM transactions WHERE transaction_id = ?"#,
         )
         .bind(id)
@@ -664,6 +671,7 @@ impl Db {
                     metadata: r.get::<Option<String>, _>("metadata").unwrap_or_default(),
                     other_fields,
                     original_order: r.get::<Option<u64>, _>("original_order"),
+                    original_transaction_id: r.get::<Option<String>, _>("original_transaction_id"),
                     // `no_name` (the unnamed column A that some sheets have) has no column in the
                     // `transactions` table, so there is nothing to read it from.
                     no_name: String::new(),
@@ -1177,8 +1185,9 @@ impl Db {
                 transaction_id, date, description, amount, account, account_number,
                 institution, month, week, full_description, account_id, check_number,
                 date_added, merchant_name, category_hint, category, note, tags,
-                categorized_date, statement, metadata, other_fields, original_order
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+                categorized_date, statement, metadata, other_fields, original_order,
+                original_transaction_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
         .bind(&txn.transaction_id)
         .bind(&txn.date)
@@ -1203,6 +1212,7 @@ impl Db {
         .bind(&txn.metadata)
         .bind(&other_fields_json)
         .bind(txn.original_order.map(|i| i as i64))
+        .bind(&txn.original_transaction_id)
         .execute(ex)
         .await
         .context("Failed to insert transaction")?;
