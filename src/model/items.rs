@@ -103,7 +103,7 @@ where
     {
         let mut rows = sheet_data.into_iter();
         let mapping = match rows.next() {
-            Some(header_row) => Mapping::new(header_row.into_iter())?,
+            Some(header_row) => Mapping::new(header_row)?,
             None => bail!("An empty data set cannot be parsed into an Items object"),
         };
 
