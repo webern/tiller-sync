@@ -4,7 +4,7 @@ use crate::args::{InsertAutoCatArgs, InsertCategoryArgs, InsertTransactionArgs};
 use crate::commands::Out;
 use crate::error::{ErrorType, IntoResult};
 use crate::model::{AutoCat, Category, Transaction};
-use crate::utils::generate_transaction_id;
+use crate::utils::{self, generate_transaction_id};
 use crate::{Config, Result};
 
 /// Inserts a new transaction into the local SQLite database.
@@ -59,7 +59,7 @@ pub async fn insert_transaction(
         statement: args.statement.unwrap_or_default(),
         metadata: args.metadata.unwrap_or_default(),
         no_name: String::new(),
-        other_fields: args.other_fields,
+        other_fields: utils::other_fields_map(args.other_fields),
         original_order: None, // Locally-added rows have no original order
     };
 
@@ -113,7 +113,7 @@ pub async fn insert_category(config: Config, args: InsertCategoryArgs) -> Result
         category_group: args.group.unwrap_or_default(),
         r#type: args.r#type.unwrap_or_default(),
         hide_from_reports: args.hide_from_reports.unwrap_or_default(),
-        other_fields: args.other_fields,
+        other_fields: utils::other_fields_map(args.other_fields),
         original_order: None, // Locally-added rows have no original order
     };
 
@@ -172,7 +172,7 @@ pub async fn insert_autocat(config: Config, args: InsertAutoCatArgs) -> Result<O
         description_full: args.description_full.unwrap_or_default(),
         full_description_contains: args.full_description_contains.unwrap_or_default(),
         amount_contains: args.amount_contains.unwrap_or_default(),
-        other_fields: args.other_fields.clone(),
+        other_fields: utils::other_fields_map(args.other_fields.clone()),
         original_order: None, // Locally-added rows have no original order
     };
 
@@ -570,7 +570,7 @@ mod tests {
             description_full: None,
             full_description_contains: None,
             amount_contains: None,
-            other_fields: std::collections::BTreeMap::new(),
+            other_fields: Vec::new(),
         };
 
         let result = insert_autocat(env.config(), args).await;
@@ -611,7 +611,7 @@ mod tests {
             description_full: None,
             full_description_contains: None,
             amount_contains: None,
-            other_fields: std::collections::BTreeMap::new(),
+            other_fields: Vec::new(),
         };
 
         let result = insert_autocat(env.config(), args).await;
@@ -649,7 +649,7 @@ mod tests {
             description_full: None,
             full_description_contains: None,
             amount_contains: None,
-            other_fields: std::collections::BTreeMap::new(),
+            other_fields: Vec::new(),
         };
 
         let result = insert_autocat(env.config(), args).await;
@@ -680,7 +680,7 @@ mod tests {
             description_full: None,
             full_description_contains: None,
             amount_contains: None,
-            other_fields: std::collections::BTreeMap::new(),
+            other_fields: Vec::new(),
         };
 
         let result1 = insert_autocat(env.config(), make_args()).await.unwrap();
@@ -710,7 +710,7 @@ mod tests {
             description_full: None,
             full_description_contains: None,
             amount_contains: None,
-            other_fields: std::collections::BTreeMap::new(),
+            other_fields: Vec::new(),
         };
 
         let result = insert_autocat(env.config(), args).await;
@@ -749,7 +749,7 @@ mod tests {
             description_full: None,
             full_description_contains: None,
             amount_contains: None,
-            other_fields: std::collections::BTreeMap::new(),
+            other_fields: Vec::new(),
         };
 
         let result = insert_autocat(env.config(), args).await;

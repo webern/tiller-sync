@@ -333,7 +333,15 @@ pub struct AutoCatUpdates {
     pub amount_contains: Option<String>,
 
     /// Custom columns not part of the standard Tiller schema.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    #[arg(long = "other-field", value_parser = utils::parse_key_val)]
-    pub other_fields: BTreeMap<String, String>,
+    ///
+    /// On the command line, repeat `--other-field Name=Value` once per column. Over MCP this is a
+    /// JSON object, e.g. `{"My Column": "value"}`.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        with = "crate::utils::other_fields"
+    )]
+    #[schemars(with = "BTreeMap<String, String>")]
+    #[arg(long = "other-field", value_name = "NAME=VALUE", value_parser = utils::parse_key_val)]
+    pub other_fields: Vec<(String, String)>,
 }
