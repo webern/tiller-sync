@@ -4,6 +4,9 @@ This MCP server synchronizes financial data between a Tiller Google Sheet and a 
 database. The local database serves as a workspace for analysis and manipulation before syncing
 changes back to the sheet.
 
+Reading this is optional. Every tool documents its own parameters and behavior in its description;
+this guide covers the wider picture that spans several tools.
+
 ## Prerequisites
 
 The user must have already completed CLI setup before using these tools:

@@ -726,6 +726,16 @@ MCP tools wrap CLI commands with equivalent parameters:
 - **sync_down**: Downloads data from Google Sheet to local SQLite. No parameters.
 - **sync_up**: Uploads data from local SQLite to Google Sheet. Parameters: `force` (bool),
   `formulas` (enum: unknown, preserve, ignore).
+- **instructions**: Returns the in-depth usage guide (`src/mcp/docs/INSTRUCTIONS.md`). No
+  parameters.
+
+Every tool is callable straight away. `instructions` is a convenience, not a precondition:
+each tool documents its own parameters and behavior in its description, and the concise
+orientation in `ServerInfo.instructions` covers the rest.
+
+**Historical note:** an earlier design gated every tool behind an `initialize_service` call, on the
+theory that agents treat `ServerInfo.instructions` as optional reading. Forcing a help lookup before
+any real work is possible makes the server behave unlike every other MCP server, and it was removed.
 
 ### Tool Responses
 

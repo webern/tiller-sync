@@ -98,10 +98,16 @@ For dead code warnings during incremental development:
 The MCP server has two important documentation files in `src/mcp/docs/`:
 
 - **`INTRO.md`**: Brief description shown to the AI client upon MCP server initialization (via
-  `ServerInfo.instructions`). Keep this concise.
-- **`INSTRUCTIONS.md`**: In-depth usage guide that the agent must read before using tools. This is
-  returned by the `initialize_service` tool and contains detailed information about workflows,
-  parameters, and best practices.
+  `ServerInfo.instructions`). Keep this concise: every client pays for it in context on every
+  session, whether or not tiller is used.
+- **`INSTRUCTIONS.md`**: In-depth usage guide, returned by the optional `instructions` tool. It
+  contains detailed information about workflows, parameters, and best practices.
+
+Calling `instructions` is NOT a precondition for using the other tools. An earlier design gated
+every tool behind an `initialize_service` call; that was removed because forcing a help lookup
+before any real work is possible makes the server behave unlike every other MCP server. Do not
+reintroduce a gate. Anything an agent must know in order to use a tool safely belongs in that tool's
+own doc comment.
 
 ### Restrictive use of Pub
 
