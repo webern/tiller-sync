@@ -161,6 +161,13 @@ This will:
 - Download Transactions, Categories, and AutoCat data from your Tiller sheet
 - Create a backup of the previous database state
 
+Run this at the **start** of a round of edits, never between editing and `tiller sync up`. It is not
+a refresh: transactions are overwritten from the sheet, and Categories and AutoCat are replaced
+outright, so any local change you have not uploaded is lost. It refuses to run when the local
+database has unsynced changes, and names what would be lost; `--force` discards them deliberately.
+
+To check whether the sheet has changed without downloading it, use `tiller status`.
+
 ### Sync Local Changes to Google Sheets
 
 Upload local changes back to your Tiller sheet:
@@ -173,6 +180,19 @@ This will:
 
 - Update your Google Sheets with any changes made to the local database
 - Create a backup before syncing
+
+### See What Has Changed
+
+```bash
+# What has changed locally, and what has changed in the sheet, since the last sync
+tiller status
+
+# Local changes only; does not read the sheet
+tiller status --local-only
+```
+
+Neither side is modified. Use this to check whether your local edits still need uploading, or
+whether the sheet has moved on, without running a sync in either direction.
 
 ### Query Data
 
@@ -261,6 +281,7 @@ claude mcp add tiller -- tiller --tiller-home /path/to/your/tiller mcp
 Once configured, Claude Code can use the following tools:
 
 - **sync_down** / **sync_up**: Sync data between your Google Sheet and local database
+- **sync_status**: See what has changed on each side since the last sync, without modifying either
 - **query**: Execute SQL queries against your local database
 - **schema**: View database structure and column descriptions
 - **insert_transaction** / **update_transactions** / **delete_transactions**: Manage transactions

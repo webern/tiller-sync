@@ -91,7 +91,7 @@ impl Tiller for TillerImpl {
         Ok(formulas_written)
     }
 
-    async fn verify_write(&mut self, expected: &TillerData) -> Res<WriteCounts> {
+    async fn verify_write(&mut self, expected: &TillerData) -> Res<(WriteCounts, TillerData)> {
         use anyhow::bail;
 
         // Re-fetch data from sheets to verify row counts
@@ -134,7 +134,7 @@ impl Tiller for TillerImpl {
             );
         }
 
-        Ok(counts)
+        Ok((counts, actual))
     }
 }
 

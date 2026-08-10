@@ -146,8 +146,10 @@ pub trait Tiller {
     ) -> Res<usize>;
 
     /// Verify that the write was successful by re-fetching the sheet.
-    /// Returns the observed counts if verification passes.
-    async fn verify_write(&mut self, expected: &TillerData) -> Res<WriteCounts>;
+    ///
+    /// Returns the observed counts and the sheet's contents. The contents are the new baseline for
+    /// conflict detection: once a `sync up` succeeds, this is what both sides agree on.
+    async fn verify_write(&mut self, expected: &TillerData) -> Res<(WriteCounts, TillerData)>;
 }
 
 /// What a `sync up` actually left behind in the Google sheet, read back after writing.

@@ -2,13 +2,37 @@ use super::{FormulasMode, Out};
 use crate::api::{sheet, tiller, Mode, Tiller};
 use crate::backup::{SYNC_DOWN, SYNC_UP_PRE};
 use crate::error::{ErrorType, IntoResult};
+use crate::model::Changes;
 use crate::{Config, Result};
 use anyhow::anyhow;
 use tracing::{debug, info, warn};
 
 /// Gets data from the tiller Google sheet and persists it to the local datastore. Returns an info
 /// message that can be printed for the user.
-pub async fn sync_down(config: Config, mode: Mode) -> Result<Out<()>> {
+///
+/// `sync down` overwrites the local datastore: transactions are upserted from the sheet, and
+/// categories and AutoCat are replaced outright. Any local edit that has not been uploaded is lost.
+/// Unless `force` is set, the command therefore refuses to run when the datastore has been edited
+/// since it was last in step with the sheet.
+pub async fn sync_down(config: Config, mode: Mode, force: bool) -> Result<Out<()>> {
+    // Refuse to overwrite local edits that have never been uploaded.
+    let local_changes = local_changes(&config).await?;
+    match local_changes {
+        Some(changes) if !changes.is_empty() => {
+            if !force {
+                return Err(anyhow!(
+                    "The local datastore has changes that are not in the sheet: {changes}. \
+                     Running 'sync down' now would discard them. Run 'tiller sync up' first to \
+                     upload them, or use --force to discard them and overwrite with the sheet's \
+                     contents. Use 'tiller status' to see the local and remote state."
+                ))
+                .pub_result(ErrorType::Sync);
+            }
+            warn!("Discarding local changes and overwriting from the sheet (--force): {changes}");
+        }
+        _ => {}
+    }
+
     // Backup SQLite database before modifying
     let sqlite_backup = config
         .backup()
@@ -43,6 +67,29 @@ pub async fn sync_down(config: Config, mode: Mode) -> Result<Out<()>> {
         tiller_data.categories.data().len(),
         tiller_data.auto_cats.data().len()
     )))
+}
+
+/// Compares the local datastore against the last known state of the sheet.
+///
+/// Returns `None` when there is no snapshot to compare against, which means no sync has ever run
+/// and there is nothing local to protect.
+pub(crate) async fn local_changes(config: &Config) -> Result<Option<Changes>> {
+    let Some(last_synced) = config
+        .backup()
+        .load_latest_json(SYNC_DOWN)
+        .await
+        .pub_result(ErrorType::Internal)?
+    else {
+        return Ok(None);
+    };
+
+    let local = config
+        .db()
+        .get_tiller_data()
+        .await
+        .pub_result(ErrorType::Database)?;
+
+    Ok(Some(Changes::between(&last_synced, &local)))
 }
 
 /// Sends data from the local datastore to the Google sheet, returns a message that can be printed
@@ -100,15 +147,18 @@ pub async fn sync_up(
         Some(backup_data) => {
             // Compare current sheet with backup
             if current_sheet != backup_data {
+                let changes = Changes::between(&backup_data, &current_sheet);
                 if !force {
                     return Err(anyhow!(
-                        "Sheet has been modified since last sync down. \
-                         Run 'tiller sync down' first to merge changes, \
-                         or use --force to overwrite"
+                        "The sheet has been modified since the last sync down: {changes}. \
+                         Merge those changes first, or use --force to overwrite them with the \
+                         local datastore. Use 'tiller status' to see what differs."
                     ))
                     .pub_result(ErrorType::Sync);
                 }
-                warn!("Sheet differs from last sync-down, proceeding anyway (--force)");
+                warn!(
+                    "Overwriting sheet changes made since the last sync down (--force): {changes}"
+                );
             }
         }
     }
@@ -179,10 +229,21 @@ pub async fn sync_up(
         .pub_result(ErrorType::Sync)?;
 
     // Verification - re-fetch and compare against what we meant to write
-    let counts = tiller_client
+    let (counts, sheet_after_write) = tiller_client
         .verify_write(&db_data)
         .await
         .pub_result(ErrorType::Sync)?;
+
+    // Record the new baseline. Both sides now agree on this, so it is what the next `sync down`
+    // measures local edits against and what the next `sync up` measures remote edits against.
+    // Without it, every command after a successful upload would report the edits just uploaded as
+    // unsynced changes.
+    let baseline = config
+        .backup()
+        .save_json(SYNC_DOWN, &sheet_after_write)
+        .await
+        .pub_result(ErrorType::Internal)?;
+    debug!("Saved post-upload baseline to {}", baseline.display());
 
     // Preserve formulas if requested.
     let formula_summary = if preserve_formulas {
@@ -226,7 +287,9 @@ mod tests {
         let config = env.config();
 
         // Run sync_down
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         // Verify SQLite backup was created
         let backup_files: Vec<_> = std::fs::read_dir(config.backups())
@@ -313,7 +376,9 @@ mod tests {
         let config = env.config();
 
         // First run sync_down to populate the database (precondition for sync_up)
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         // Run sync_up - should create sync-up-pre backup
         sync_up(config.clone(), Mode::Testing, false, FormulasMode::Ignore)
@@ -342,7 +407,9 @@ mod tests {
         let config = env.config();
 
         // Run sync_down to populate the database
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         // Delete all sync-down.*.json backup files
         for entry in std::fs::read_dir(config.backups()).unwrap() {
@@ -374,7 +441,9 @@ mod tests {
         let config = env.config();
 
         // Run sync_down to populate the database
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         // Delete all sync-down.*.json backup files
         for entry in std::fs::read_dir(config.backups()).unwrap() {
@@ -401,7 +470,9 @@ mod tests {
         let config = env.config();
 
         // Run sync_down to populate the database and create backup
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         // Update the remote sheet with some change (row 1 is first data row, row 0 is header)
         let mut state = env.get_state();
@@ -439,7 +510,9 @@ mod tests {
         let config = env.config();
 
         // Run sync_down to populate the database and create backup
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         // Update the remote sheet with some change (row 1 is first data row, row 0 is header)
         let mut state = env.get_state();
@@ -470,7 +543,9 @@ mod tests {
         let config = env.config();
 
         // Run sync_down to populate the database
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         // Delete a transaction from the database to create a gap in original_order
         // (e.g., if we have rows with original_order 0, 1, 2, deleting row 1 creates gap 0, 2)
@@ -502,7 +577,9 @@ mod tests {
         let config = env.config();
 
         // Run sync_down to populate the database
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         // Delete a transaction from the database to create a gap in original_order
         let db = config.db();
@@ -528,7 +605,9 @@ mod tests {
         let config = env.config();
 
         // Run sync_down to populate the database
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         // Delete a transaction from the database to create a gap in original_order
         let db = config.db();
@@ -554,7 +633,9 @@ mod tests {
         let config = env.config();
 
         // Run sync_down to populate the database
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         // Count existing SQLite backups (sync_down creates one)
         let backup_count_before: usize = std::fs::read_dir(config.backups())
@@ -597,7 +678,9 @@ mod tests {
         let config = env.config();
 
         // Run sync_down to populate the database
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         // Clear call history to isolate sync_up calls
         let test_sheet = TestSheet::new(config.spreadsheet_id());
@@ -628,7 +711,9 @@ mod tests {
         let config = env.config();
 
         // Run sync_down to populate the database
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         // Clear call history to isolate sync_up calls
         let test_sheet = TestSheet::new(config.spreadsheet_id());
@@ -697,7 +782,9 @@ mod tests {
         let config = env.config();
 
         // Run sync_down to populate the database
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         // Clear call history to isolate sync_up calls
         let test_sheet = TestSheet::new(config.spreadsheet_id());
@@ -738,7 +825,9 @@ mod tests {
         let config = env.config();
 
         // Run sync_down to populate the database (test data includes formulas)
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         // Verify that formulas actually exist in the database
         let db_data = config.db().get_tiller_data().await.unwrap();
@@ -784,6 +873,118 @@ mod tests {
         env.set_state(state);
     }
 
+    /// The README and the MCP instructions used to say "always run sync_down first". Taken at face
+    /// value after local edits, that silently reverts every recategorization and deletes every
+    /// locally-added AutoCat rule. `sync down` now refuses rather than destroying the work.
+    ///
+    /// See https://github.com/webern/tiller-sync/issues/38
+    #[tokio::test]
+    async fn test_sync_down_refuses_to_discard_local_changes() {
+        let env = TestEnv::new().await;
+        let config = env.config();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
+
+        // Recategorize a transaction, exactly the edit the reporter nearly lost.
+        let data = config.db().get_tiller_data().await.unwrap();
+        let id = data.transactions.data()[0].transaction_id.clone();
+        let updates = crate::model::TransactionUpdates {
+            category: Some("Restaurants".to_string()),
+            ..Default::default()
+        };
+        let args = crate::args::UpdateTransactionsArgs::new(vec![id.clone()], updates).unwrap();
+        crate::commands::update_transactions(config.clone(), args)
+            .await
+            .unwrap();
+
+        let result = sync_down(config.clone(), Mode::Testing, false).await;
+
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("1 transaction") && err.contains("sync up"),
+            "the error should name what would be lost and how to keep it, got: {err}"
+        );
+
+        // And the edit is still there.
+        let after = config.db()._get_transaction(&id).await.unwrap().unwrap();
+        assert_eq!(after.category, "Restaurants");
+    }
+
+    /// Discarding local work has to remain possible, just deliberate.
+    #[tokio::test]
+    async fn test_sync_down_discards_local_changes_with_force() {
+        let env = TestEnv::new().await;
+        let config = env.config();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
+
+        let data = config.db().get_tiller_data().await.unwrap();
+        let id = data.transactions.data()[0].transaction_id.clone();
+        let original = data.transactions.data()[0].category.clone();
+        let updates = crate::model::TransactionUpdates {
+            category: Some("Restaurants".to_string()),
+            ..Default::default()
+        };
+        let args = crate::args::UpdateTransactionsArgs::new(vec![id.clone()], updates).unwrap();
+        crate::commands::update_transactions(config.clone(), args)
+            .await
+            .unwrap();
+
+        sync_down(config.clone(), Mode::Testing, true)
+            .await
+            .expect("--force should allow the overwrite");
+
+        let after = config.db()._get_transaction(&id).await.unwrap().unwrap();
+        assert_eq!(after.category, original, "the sheet's value should win");
+    }
+
+    /// A clean datastore must sync down without ceremony, or the guard would be worse than the
+    /// problem it solves.
+    #[tokio::test]
+    async fn test_sync_down_proceeds_when_nothing_changed_locally() {
+        let env = TestEnv::new().await;
+        let config = env.config();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
+
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .expect("a second sync down with no local edits should just work");
+    }
+
+    /// The normal workflow is sync down, edit, sync up, sync down. That last step must not be
+    /// blocked by the edits that were just uploaded.
+    #[tokio::test]
+    async fn test_sync_down_after_sync_up_is_not_blocked() {
+        let env = TestEnv::new().await;
+        let config = env.config();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
+
+        let data = config.db().get_tiller_data().await.unwrap();
+        let id = data.transactions.data()[0].transaction_id.clone();
+        let updates = crate::model::TransactionUpdates {
+            category: Some("Restaurants".to_string()),
+            ..Default::default()
+        };
+        let args = crate::args::UpdateTransactionsArgs::new(vec![id], updates).unwrap();
+        crate::commands::update_transactions(config.clone(), args)
+            .await
+            .unwrap();
+
+        sync_up(config.clone(), Mode::Testing, false, FormulasMode::Ignore)
+            .await
+            .unwrap();
+
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .expect("after uploading, the datastore is in step and sync down should work");
+    }
+
     /// `transactions.transaction_id` is a primary key, and real sheets violate uniqueness: some
     /// feeds supply no ID at all, and malformed split markers repeat `split:[1]` across rows.
     /// `sync down` used to abort on the first such row with a bare UNIQUE constraint error.
@@ -805,7 +1006,7 @@ mod tests {
             ],
         );
 
-        let out = sync_down(config.clone(), Mode::Testing)
+        let out = sync_down(config.clone(), Mode::Testing, false)
             .await
             .expect("sync down must not abort on unusable Transaction IDs");
         assert!(out.message().contains("20 transactions"), "no row was lost");
@@ -843,7 +1044,9 @@ mod tests {
         let config = env.config();
 
         set_transaction_ids(&env, &[(0, ""), (1, "")]);
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         let first: Vec<String> = config
             .db()
@@ -856,7 +1059,9 @@ mod tests {
             .map(|t| t.transaction_id.clone())
             .collect();
 
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         let second: Vec<String> = config
             .db()
@@ -882,7 +1087,9 @@ mod tests {
         let config = env.config();
 
         set_transaction_ids(&env, &[(0, ""), (1, "split:[1]"), (2, "split:[1]")]);
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         let test_sheet = TestSheet::new(config.spreadsheet_id());
         test_sheet.clear_history();
@@ -925,7 +1132,9 @@ mod tests {
         let env = TestEnv::new().await;
         let config = env.config();
 
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         let db_data = config.db().get_tiller_data().await.unwrap();
         let expected_formulas = db_data.transactions.formulas().clone();
@@ -985,7 +1194,9 @@ mod tests {
         let env = TestEnv::new().await;
         let config = env.config();
 
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         let test_sheet = TestSheet::new(config.spreadsheet_id());
         test_sheet.clear_history();
@@ -1022,7 +1233,9 @@ mod tests {
         let env = TestEnv::new().await;
         let config = env.config();
 
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
         let expected = config
             .db()
             .get_tiller_data()
@@ -1050,7 +1263,9 @@ mod tests {
         let env = TestEnv::new().await;
         let config = env.config();
 
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         // Delete the last transaction, so the formula bound to the final row has no row left.
         let db = config.db();
@@ -1079,7 +1294,9 @@ mod tests {
         let config = env.config();
 
         // Run sync_down to populate the database (this also seeds the TestSheet)
-        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        sync_down(config.clone(), Mode::Testing, false)
+            .await
+            .unwrap();
 
         // Capture original sheet state after sync_down (seed data is now loaded)
         let test_sheet = TestSheet::new(config.spreadsheet_id());

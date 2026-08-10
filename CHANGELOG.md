@@ -25,11 +25,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `tiller status` (MCP: `sync_status`) reports what has changed locally and in the sheet since the
+  last sync, without modifying either. This makes it possible to check for remote changes without
+  running `sync down`. [#38]
+- `sync down` now refuses to run when the local datastore has changes that have not been uploaded,
+  naming what would be lost. `--force` discards them deliberately. [#38]
 - `sync up` reports how many formulas were written and reads the sheet back to check that they
   landed, warning if the counts disagree. [#35]
 
 ### Changed
 
+- Documentation no longer says to "always sync down first". Taken at face value after making local
+  edits, that advice reverts every local change. It is now scoped to the start of a round of edits.
+  [#38]
+- `sync up`'s conflict message names how many rows were added, modified, and deleted in the sheet
+  since the last download, instead of only saying that it changed.
 - MCP tools no longer require an `initialize_service` call before they can be used. The tool is
   replaced by an optional `instructions` tool that returns the same in-depth guide, and the
   server's `ServerInfo.instructions` is now a concise orientation.
@@ -119,5 +129,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#35]: https://github.com/webern/tiller-sync/issues/35
 [#36]: https://github.com/webern/tiller-sync/issues/36
 [#37]: https://github.com/webern/tiller-sync/issues/37
+[#38]: https://github.com/webern/tiller-sync/issues/38
 [#40]: https://github.com/webern/tiller-sync/issues/40
 [#41]: https://github.com/webern/tiller-sync/issues/41

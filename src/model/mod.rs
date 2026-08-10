@@ -2,6 +2,7 @@
 mod amount;
 mod auto_cat;
 mod category;
+mod changes;
 mod date;
 mod items;
 mod mapping;
@@ -12,6 +13,7 @@ mod transaction_ids;
 pub use amount::{Amount, AmountFormat};
 pub use auto_cat::{AutoCat, AutoCatUpdates, AutoCats};
 pub use category::{Categories, Category, CategoryUpdates};
+pub use changes::{Changes, TabChanges};
 pub use date::Date;
 pub(crate) use date::{DateFromOpt, DateFromOptStr, DateToSheetStr};
 pub(crate) use items::Item;

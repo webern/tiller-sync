@@ -8,6 +8,7 @@ mod init;
 mod insert;
 mod mcp;
 pub mod query;
+mod status;
 mod sync;
 mod update;
 
@@ -25,6 +26,7 @@ pub use init::init;
 pub use insert::{insert_autocat, insert_category, insert_transaction};
 pub use mcp::mcp;
 pub use query::{query, schema, ColumnInfo, ForeignKeyInfo, IndexInfo, Rows, Schema, TableInfo};
+pub use status::{status, SyncStatus};
 pub use sync::{sync_down, sync_up};
 pub use update::{update_autocats, update_categories, update_transactions};
 

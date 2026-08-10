@@ -95,6 +95,27 @@ pub enum Command {
     ///
     /// Returns tables, columns, types, indexes, foreign keys, column descriptions, and row counts.
     Schema(SchemaArgs),
+    /// Show what has changed locally and in the Google Sheet since the last sync.
+    ///
+    /// Neither side is modified. Use this to see whether local edits still need uploading, or
+    /// whether the sheet has moved on, without running a sync in either direction.
+    Status(StatusArgs),
+}
+
+/// Args for the `tiller status` command.
+///
+/// Reports edits made to the local datastore since the last sync (which `sync down` would discard)
+/// and edits made to the Google Sheet since the last sync (which `sync up` would overwrite).
+#[derive(Debug, Clone, Parser, Serialize, Deserialize, JsonSchema, Default)]
+#[schemars(title = "StatusArgs")]
+pub struct StatusArgs {
+    /// Skip reading the Google Sheet and report local changes only.
+    ///
+    /// Reading the sheet needs network access and valid authentication. Use this when you only
+    /// want to know whether your local edits have been uploaded.
+    #[arg(long, default_value = "false")]
+    #[serde(default)]
+    pub local_only: bool,
 }
 
 /// Arguments common to all subcommands.
@@ -201,7 +222,11 @@ pub struct SyncArgs {
     /// The path to the Google OAuth token file, defaults to $TILLER_HOME/.secrets/token.json
     oauth_token: Option<PathBuf>,
 
-    /// Force sync up even if conflicts are detected or sync-down backup is missing
+    /// Proceed even when the sync would discard changes.
+    ///
+    /// For `sync down`, this discards local edits that have not been uploaded. For `sync up`, this
+    /// overwrites sheet changes made since the last download, and allows a sync up when no
+    /// sync-down backup exists.
     #[arg(long)]
     force: bool,
 
