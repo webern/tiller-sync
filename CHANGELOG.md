@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `tiller query` and `tiller schema` now write their results to `stdout` instead of discarding them.
+  [#36]
+
 ### Changed
 
 - Update dependencies, including major-version upgrades of `rmcp` (0.12 to 3) and `sqlx` (0.8 to
@@ -87,3 +92,4 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 <!-- Issues -->
 [#24]: https://github.com/webern/tiller-sync/issues/24
 [#28]: https://github.com/webern/tiller-sync/issues/28
+[#36]: https://github.com/webern/tiller-sync/issues/36
