@@ -1407,8 +1407,13 @@ impl Db {
         use crate::commands::{Out, Rows};
         use sqlx::Row;
 
-        // Execute the query on the read-only pool
-        let rows = sqlx::query(&args.sql)
+        // Execute the query on the read-only pool.
+        //
+        // `AssertSqlSafe` is required because the SQL is supplied by the caller rather than being a
+        // literal. That is the entire point of this interface: it is a raw SQL query tool. Safety
+        // comes from `ro_pool`, which SQLite itself opens read-only, so no statement executed here
+        // can modify the database.
+        let rows = sqlx::query(sqlx::AssertSqlSafe(args.sql.clone()))
             .fetch_all(&self.ro_pool)
             .await
             .context("SQL error")?;
@@ -1546,10 +1551,11 @@ impl Db {
 
         for table_name in table_names {
             // Get column info using PRAGMA table_info
-            let col_rows: Vec<(i64, String, String, i64, Option<String>, i64)> =
-                sqlx::query_as(&format!("PRAGMA table_info({})", table_name))
-                    .fetch_all(&self.ro_pool)
-                    .await?;
+            let col_rows: Vec<(i64, String, String, i64, Option<String>, i64)> = sqlx::query_as(
+                sqlx::AssertSqlSafe(format!("PRAGMA table_info({table_name})")),
+            )
+            .fetch_all(&self.ro_pool)
+            .await?;
 
             // Get field descriptions from the model types
             let descriptions: BTreeMap<String, String> = match table_name {
@@ -1574,10 +1580,11 @@ impl Db {
                 .collect();
 
             // Get index info using PRAGMA index_list
-            let index_rows: Vec<(i64, String, i64, String, i64)> =
-                sqlx::query_as(&format!("PRAGMA index_list({})", table_name))
-                    .fetch_all(&self.ro_pool)
-                    .await?;
+            let index_rows: Vec<(i64, String, i64, String, i64)> = sqlx::query_as(
+                sqlx::AssertSqlSafe(format!("PRAGMA index_list({table_name})")),
+            )
+            .fetch_all(&self.ro_pool)
+            .await?;
 
             let mut indexes = Vec::new();
             for (_, idx_name, unique, _, _) in &index_rows {
@@ -1587,10 +1594,11 @@ impl Db {
                 }
 
                 // Get columns in this index
-                let idx_col_rows: Vec<(i64, i64, String)> =
-                    sqlx::query_as(&format!("PRAGMA index_info({})", idx_name))
-                        .fetch_all(&self.ro_pool)
-                        .await?;
+                let idx_col_rows: Vec<(i64, i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(
+                    format!("PRAGMA index_info({idx_name})"),
+                ))
+                .fetch_all(&self.ro_pool)
+                .await?;
 
                 let idx_columns: Vec<String> = idx_col_rows
                     .iter()
@@ -1615,9 +1623,11 @@ impl Db {
                 String,
                 String,
                 String,
-            )> = sqlx::query_as(&format!("PRAGMA foreign_key_list({})", table_name))
-                .fetch_all(&self.ro_pool)
-                .await?;
+            )> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                "PRAGMA foreign_key_list({table_name})"
+            )))
+            .fetch_all(&self.ro_pool)
+            .await?;
 
             // Group by FK id to handle composite keys
             let mut fk_map: BTreeMap<i64, (String, Vec<String>, Vec<String>)> = BTreeMap::new();
@@ -1639,9 +1649,11 @@ impl Db {
                 .collect();
 
             // Get row count
-            let count_row: (i64,) = sqlx::query_as(&format!("SELECT COUNT(*) FROM {}", table_name))
-                .fetch_one(&self.ro_pool)
-                .await?;
+            let count_row: (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                "SELECT COUNT(*) FROM {table_name}"
+            )))
+            .fetch_one(&self.ro_pool)
+            .await?;
             let row_count = count_row.0 as u64;
 
             tables.push(TableInfo {

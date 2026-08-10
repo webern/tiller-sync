@@ -9,7 +9,7 @@ use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime};
 use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
 use sqlx::encode::IsNull;
 use sqlx::error::BoxDynError;
-use sqlx::sqlite::{SqliteArgumentValue, SqliteTypeInfo, SqliteValueRef};
+use sqlx::sqlite::{SqliteArgumentsBuffer, SqliteTypeInfo, SqliteValueRef};
 use sqlx::{Decode, Encode, Sqlite, Type};
 use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter};
@@ -34,7 +34,7 @@ impl Type<Sqlite> for Date {
 }
 
 impl Encode<'_, Sqlite> for Date {
-    fn encode_by_ref(&self, buf: &mut Vec<SqliteArgumentValue<'_>>) -> Result<IsNull, BoxDynError> {
+    fn encode_by_ref(&self, buf: &mut SqliteArgumentsBuffer) -> Result<IsNull, BoxDynError> {
         Encode::<Sqlite>::encode(self.to_string(), buf)
     }
 }

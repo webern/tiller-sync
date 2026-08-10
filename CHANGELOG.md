@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Update dependencies, including major-version upgrades of `rmcp` (0.12 to 3) and `sqlx` (0.8 to
+  0.9)
+
 ## [v0.2.1] - 2025-01-25
 
 ### Fixed

@@ -54,13 +54,13 @@ impl TillerServer {
     }
 
     fn uninitialized() -> Result<CallToolResult, McpError> {
-        Ok(CallToolResult::error(vec![rmcp::model::Content::text(
+        Ok(CallToolResult::error(vec![rmcp::model::ContentBlock::text(
             "You have not yet initialized the service. Please call __initialize_service__ first.",
         )]))
     }
 }
 
-#[tool_handler]
+#[tool_handler(router = self.tool_router)]
 impl ServerHandler for TillerServer {
     /// Returns server information sent to the MCP client during initialization.
     ///
@@ -70,16 +70,11 @@ impl ServerHandler for TillerServer {
     /// been noted that agents tend to consider this reading as optional. We have solved this
     /// problem by requiring agents to call an `__initialize_service__` tool before anything else.
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            protocol_version: ProtocolVersion::V_2024_11_05,
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            server_info: Implementation {
-                name: "tiller".into(),
-                version: env!("CARGO_PKG_VERSION").into(),
-                ..Default::default()
-            },
-            instructions: Some(include_str!("docs/INTRO.md").into()),
-        }
+        let mut info = ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_instructions(include_str!("docs/INTRO.md"));
+        info.protocol_version = ProtocolVersion::V_2024_11_05;
+        info.server_info = Implementation::new("tiller", env!("CARGO_PKG_VERSION"));
+        info
     }
 }
 
@@ -163,10 +158,9 @@ mod tests {
 
         // Test 1: Call initialize_service tool
         let init_result = client
-            .call_tool(rmcp::model::CallToolRequestParam {
-                name: "initialize_service".into(),
-                arguments: None,
-            })
+            .call_tool(rmcp::model::CallToolRequestParams::new(
+                "initialize_service",
+            ))
             .await
             .expect("initialize_service call failed");
 
@@ -178,10 +172,7 @@ mod tests {
 
         // Test 2: Call sync_down tool
         let sync_down_result = client
-            .call_tool(rmcp::model::CallToolRequestParam {
-                name: "sync_down".into(),
-                arguments: None,
-            })
+            .call_tool(rmcp::model::CallToolRequestParams::new("sync_down"))
             .await
             .expect("sync_down call failed");
 
@@ -200,10 +191,7 @@ mod tests {
         );
 
         let sync_up_result = client
-            .call_tool(rmcp::model::CallToolRequestParam {
-                name: "sync_up".into(),
-                arguments: Some(args),
-            })
+            .call_tool(rmcp::model::CallToolRequestParams::new("sync_up").with_arguments(args))
             .await
             .expect("sync_up call failed");
 
@@ -230,10 +218,10 @@ mod tests {
             .clone();
 
         let update_result = client
-            .call_tool(rmcp::model::CallToolRequestParam {
-                name: "update_transactions".into(),
-                arguments: Some(updates_json),
-            })
+            .call_tool(
+                rmcp::model::CallToolRequestParams::new("update_transactions")
+                    .with_arguments(updates_json),
+            )
             .await
             .expect("update_transactions call failed");
 
