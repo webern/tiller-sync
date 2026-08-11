@@ -735,11 +735,19 @@ raw SQL. This is designed primarily for AI agents via MCP, with CLI as a seconda
 6. **Error Handling**: SQL errors are wrapped with `.context("SQL error")` to provide the SQLite
    error message with a clear prefix.
 
+7. **Output Destination**: On the CLI, `query` and `schema` write their results to `stdout` so they
+   can be redirected or piped. Logging (including the `Out.message` summary line) stays on `stderr`,
+   as it does for every other command. Commands whose purpose is to perform an action rather than
+   return data write nothing to `stdout`.
+
 ### CLI Commands
 
 ```bash
 # Execute a SQL query (defaults to JSON output)
 tiller query "SELECT * FROM transactions WHERE category = 'Food' LIMIT 10"
+
+# Results go to stdout, so they can be redirected or piped
+tiller query --format csv "SELECT * FROM transactions" > transactions.csv
 
 # Specify output format
 tiller query --format markdown "SELECT * FROM transactions LIMIT 5"

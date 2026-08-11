@@ -121,14 +121,20 @@ pub async fn main_inner(args: Args) -> Result<()> {
             }
         }
 
+        // `query` and `schema` exist to return data, so their results go to stdout rather than to
+        // the log, which is on stderr.
         Command::Query(query_args) => {
             let config = Config::load(home).await?;
-            commands::query(config, query_args.clone()).await?.print()
+            commands::query(config, query_args.clone())
+                .await?
+                .print_data()?
         }
 
         Command::Schema(schema_args) => {
             let config = Config::load(home).await?;
-            commands::schema(config, schema_args.clone()).await?.print()
+            commands::schema(config, schema_args.clone())
+                .await?
+                .print_data()?
         }
     };
     Ok(())

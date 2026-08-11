@@ -66,6 +66,16 @@ pub struct Schema {
     pub tables: Vec<TableInfo>,
 }
 
+impl Display for Schema {
+    /// The schema is always structured data, so it renders as pretty-printed JSON.
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match serde_json::to_string_pretty(self) {
+            Ok(s) => write!(f, "{s}"),
+            Err(_) => write!(f, "{self:?}"),
+        }
+    }
+}
+
 /// Information about a database table.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TableInfo {
@@ -143,4 +153,93 @@ pub async fn schema(config: Config, args: SchemaArgs) -> Result<Out<Schema>> {
         .get_schema(args)
         .await
         .pub_result(ErrorType::Database)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::args::OutputFormat;
+    use crate::test::TestEnv;
+
+    /// The CLI used to format query results and then throw them away, so `tiller query` exited 0
+    /// having emitted nothing at all. Every format must reach the writer.
+    /// See https://github.com/webern/tiller-sync/issues/36
+    async fn query_output(format: OutputFormat) -> String {
+        let env = TestEnv::new().await;
+        env.insert_test_transaction("test-txn-stdout").await;
+
+        let args = QueryArgs::new(
+            "SELECT transaction_id, description FROM transactions ORDER BY transaction_id",
+            format,
+        );
+        let out = query(env.config(), args).await.unwrap();
+
+        let mut buffer: Vec<u8> = Vec::new();
+        out.write_data(&mut buffer).unwrap();
+        String::from_utf8(buffer).unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_query_writes_json_to_output() {
+        let output = query_output(OutputFormat::Json).await;
+        assert!(
+            output.contains("test-txn-stdout"),
+            "JSON query output should reach the writer, got: {output:?}"
+        );
+        assert!(
+            output.contains("transaction_id"),
+            "JSON query output should be self-describing, got: {output:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_query_writes_markdown_to_output() {
+        let output = query_output(OutputFormat::Markdown).await;
+        assert!(
+            output.contains("test-txn-stdout") && output.contains('|'),
+            "Markdown query output should reach the writer, got: {output:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_query_writes_csv_to_output() {
+        let output = query_output(OutputFormat::Csv).await;
+        assert!(
+            output.contains("test-txn-stdout") && output.contains(','),
+            "CSV query output should reach the writer, got: {output:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_schema_writes_to_output() {
+        let env = TestEnv::new().await;
+        let out = schema(env.config(), SchemaArgs::default()).await.unwrap();
+
+        let mut buffer: Vec<u8> = Vec::new();
+        out.write_data(&mut buffer).unwrap();
+        let output = String::from_utf8(buffer).unwrap();
+
+        assert!(
+            output.contains("transactions") && output.contains("categories"),
+            "Schema output should reach the writer, got: {output:?}"
+        );
+    }
+
+    /// An empty result set should still produce output rather than nothing at all.
+    #[tokio::test]
+    async fn test_query_with_no_rows_still_writes_output() {
+        let env = TestEnv::new().await;
+        let args = QueryArgs::new("SELECT * FROM transactions", OutputFormat::Json);
+        let out = query(env.config(), args).await.unwrap();
+
+        let mut buffer: Vec<u8> = Vec::new();
+        out.write_data(&mut buffer).unwrap();
+        let output = String::from_utf8(buffer).unwrap();
+
+        assert_eq!(
+            output.trim(),
+            "[]",
+            "An empty result set should print an empty JSON array"
+        );
+    }
 }

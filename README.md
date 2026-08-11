@@ -189,6 +189,8 @@ tiller query --format markdown "SELECT category, SUM(amount) as total FROM trans
 tiller query --format csv "SELECT * FROM transactions WHERE amount < 0" > expenses.csv
 ```
 
+Results are written to `stdout`, so they can be redirected or piped. Log output goes to `stderr`.
+
 ### View Database Schema
 
 ```bash
