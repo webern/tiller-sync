@@ -24,6 +24,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `sync up` reports how many formulas were written and reads the sheet back to check that they
   landed, warning if the counts disagree. [#35]
+- Negative amounts can now be given as `--amount -12.34` instead of only `--amount=-12.34`. [#41]
+- `--other-field` on the `insert` and `update` subcommands is now optional and no longer panics when
+  supplied. Repeating it adds one custom column per occurrence. [#41]
 
 ### Changed
 
