@@ -316,12 +316,20 @@ impl Sheet for TestSheet {
 
                 let state = map.entry(self.name.clone()).or_default();
 
+                // A real sheet stores the text it was sent and reports it back under the FORMULA
+                // render option, while the value render option shows the evaluated result. Record
+                // the incoming grid as the formula grid, then reduce it to values.
+                let written_values = evaluate(&sheet_range.values, state.data.get(sheet_name));
+                state
+                    .formulas
+                    .insert(sheet_name.to_string(), sheet_range.values.clone());
+
                 // Get or create the sheet data
                 let sheet_data = state.data.entry(sheet_name.to_string()).or_default();
 
                 // If range starts at A1, replace all data with the provided values
                 if sheet_range.range.contains("A1:") || sheet_range.range.ends_with("!A1") {
-                    *sheet_data = sheet_range.values.clone();
+                    *sheet_data = written_values;
                 } else if sheet_range.range.contains("A2:") {
                     // If range starts at A2, preserve header and replace/append data
                     let header = if !sheet_data.is_empty() {
@@ -333,14 +341,10 @@ impl Sheet for TestSheet {
                     if let Some(h) = header {
                         sheet_data.push(h);
                     }
-                    for row in &sheet_range.values {
-                        sheet_data.push(row.clone());
-                    }
+                    sheet_data.extend(written_values);
                 } else {
                     // Default: append data rows
-                    for row in &sheet_range.values {
-                        sheet_data.push(row.clone());
-                    }
+                    sheet_data.extend(written_values);
                 }
             }
         }
@@ -373,6 +377,35 @@ impl Sheet for TestSheet {
 
         Ok(fake_file_id)
     }
+}
+
+/// Reduces a written grid to the values a real sheet would report back.
+///
+/// Google Sheets stores the text it is sent and evaluates any cell beginning with `=`. This test
+/// double cannot evaluate anything, so a formula cell keeps whatever value that cell held before
+/// the write. Tiller's formulas are position-relative (`=ABS(E7)` in the row it sits on), so
+/// rewriting one onto its own cell recomputes the same result, which is what keeping the previous
+/// value simulates. A formula written where there was no previous value comes back empty.
+fn evaluate(written: &SheetData, previous: Option<&SheetData>) -> SheetData {
+    written
+        .iter()
+        .enumerate()
+        .map(|(row_ix, row)| {
+            row.iter()
+                .enumerate()
+                .map(|(col_ix, cell)| {
+                    if !cell.starts_with('=') {
+                        return cell.clone();
+                    }
+                    previous
+                        .and_then(|grid| grid.get(row_ix))
+                        .and_then(|prev_row| prev_row.get(col_ix))
+                        .cloned()
+                        .unwrap_or_default()
+                })
+                .collect()
+        })
+        .collect()
 }
 
 /// Provides the seed data and formula data from this module.

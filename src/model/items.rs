@@ -189,6 +189,60 @@ where
         Ok(rows)
     }
 
+    /// Builds the grid to send to the Google sheet during `sync up`.
+    ///
+    /// Returns the rows along with the number of formula cells they contain. When
+    /// `preserve_formulas` is false this is [`Self::to_rows`] and the count is zero.
+    pub(crate) fn to_rows_for_write(
+        &self,
+        preserve_formulas: bool,
+    ) -> Res<(Vec<Vec<String>>, usize)> {
+        if preserve_formulas {
+            self.to_rows_preserving_formulas()
+        } else {
+            Ok((self.to_rows()?, 0))
+        }
+    }
+
+    /// The same as [`Self::to_rows`], except that the stored cell formulas are laid back over the
+    /// grid so they survive a `sync up`.
+    ///
+    /// Returns the rows along with the number of formulas that were placed.
+    ///
+    /// Formula keys are `RowCol(data_row, col)`, where `data_row` is 0-based over data rows only,
+    /// so a formula belongs at `rows[data_row + 1]` once the header row is prepended. Writes go out
+    /// with `ValueInputOption::UserEntered`, so Sheets re-parses each `=...` string as a live
+    /// formula rather than storing it as text.
+    ///
+    /// Formulas are tied to sheet positions rather than to rows, which is why this is positional
+    /// and why `sync up` refuses to run in this mode when `original_order` has gaps unless
+    /// `--force` is given: a deletion shifts every row below it, and the formulas no longer line up
+    /// with the data they were written against.
+    pub(crate) fn to_rows_preserving_formulas(&self) -> Res<(Vec<Vec<String>>, usize)> {
+        let mut rows = self.to_rows()?;
+        let mut written = 0;
+
+        for (row_col, formula) in self.formulas() {
+            // +1 to skip the header row.
+            let row = row_col.row() + 1;
+            let col = row_col.col();
+
+            let Some(target) = rows.get_mut(row) else {
+                // The row no longer exists locally, so there is no cell to write to. Dropping the
+                // formula is better than shifting it onto a different row.
+                continue;
+            };
+
+            if col >= target.len() {
+                target.resize(col + 1, String::new());
+            }
+            target[col] = formula.clone();
+            written += 1;
+        }
+
+        Ok((rows, written))
+    }
+
     pub fn data(&self) -> &Vec<I> {
         &self.data
     }

@@ -406,19 +406,28 @@ dependencies on row/column ordering and provides predictable, repeatable results
         - Transactions: `"Transactions!A1:ZZ"`
         - Categories: `"Categories!A1:ZZ"`
         - AutoCat: `"AutoCat!A1:ZZ"`
-    - d. **Write**: Write all rows (headers + data) in a single operation
+    - d. **Overlay formulas** (only if `--formulas preserve`): before writing, each stored formula
+      is laid over the grid at its original position. A formula keyed `(data_row, col)` belongs at
+      `rows[data_row + 1]`, where the `+ 1` skips the header row that was prepended. A formula whose
+      row no longer exists locally is dropped rather than moved onto a different row.
+    - e. **Write**: Write all rows (headers + data, with any overlaid formulas) in a single
+      operation
         - Transactions: `"Transactions!A1:ZZ"`
         - Categories: `"Categories!A1:ZZ"`
         - AutoCat: `"AutoCat!A1:ZZ"`
-    - e. **Write formulas** (only if `--formulas preserve`): Write formulas to original positions
-        - For each formula in the map, write to cell at (row + 2, col + 1) in A1 notation
-        - Row offset of 2 accounts for 1-indexed sheets plus header row
+        - Formulas travel in the same write as the values. Because `ValueInputOption::UserEntered`
+          is used, Sheets re-parses each `=...` string as a live formula. A single write means the
+          sheet is never left holding the values without the formulas.
 
 9. **Verification**
-    - a. Re-fetch row counts from each tab
-    - b. Verify counts match what we wrote
-    - c. Log summary: `"Synced N transactions, M categories, P autocat rules to sheet"`
-    - d. If `--formulas preserve`: log count of formulas written per sheet
+    - a. Re-fetch each tab, reading both values and formulas
+    - b. Verify row counts match what we wrote
+    - c. Verify the formula count matches the number of formulas written, warning on a mismatch and
+      naming the pre-upload snapshot to recover from. A formula whose result is identical to its own
+      text is indistinguishable from a plain value on read-back, so a mismatch is a warning rather
+      than an error.
+    - d. Log summary: `"Synced N transactions, M categories, P autocat rules to sheet"`, including
+      the formula count when `--formulas preserve` was used
 
 10. **Error Handling**
     - a. If any operation fails, the backup files allow manual recovery
