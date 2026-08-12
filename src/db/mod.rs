@@ -606,7 +606,7 @@ impl Db {
                 transaction_id, date, description, amount, account, account_number,
                 institution, month, week, full_description, account_id, check_number,
                 date_added, merchant_name, category_hint, category, note, tags,
-                categorized_date, statement, metadata, other_fields
+                categorized_date, statement, metadata, other_fields, original_order
             FROM transactions WHERE transaction_id = ?"#,
         )
         .bind(id)
@@ -663,7 +663,10 @@ impl Db {
                     statement: r.get::<Option<String>, _>("statement").unwrap_or_default(),
                     metadata: r.get::<Option<String>, _>("metadata").unwrap_or_default(),
                     other_fields,
-                    ..Default::default()
+                    original_order: r.get::<Option<u64>, _>("original_order"),
+                    // `no_name` (the unnamed column A that some sheets have) has no column in the
+                    // `transactions` table, so there is nothing to read it from.
+                    no_name: String::new(),
                 }))
             }
         }

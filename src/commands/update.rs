@@ -131,8 +131,11 @@ pub async fn update_autocats(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::args::{UpdateAutoCatsArgs, UpdateCategoriesArgs, UpdateTransactionsArgs};
-    use crate::model::{AutoCatUpdates, CategoryUpdates, TransactionUpdates};
+    use crate::args::{
+        InsertTransactionArgs, UpdateAutoCatsArgs, UpdateCategoriesArgs, UpdateTransactionsArgs,
+    };
+    use crate::commands::insert_transaction;
+    use crate::model::{AutoCatUpdates, CategoryUpdates, Date, TransactionUpdates};
     use crate::test::TestEnv;
 
     #[tokio::test]
@@ -194,6 +197,104 @@ mod tests {
         assert_eq!(updated.note, "new note");
         assert_eq!(updated.category, "Entertainment");
         assert_eq!(updated.account_number, "1234");
+    }
+
+    /// Updating a transaction used to clear its `original_order`. NULL sorts last, so on the next
+    /// `sync up` every touched row was written below the oldest row of the Transactions tab,
+    /// regardless of date.
+    ///
+    /// See https://github.com/webern/tiller-sync/issues/40
+    #[tokio::test]
+    async fn test_update_transactions_preserves_original_order() {
+        let env = TestEnv::new().await;
+        let txn_id = "test-txn-order";
+        env.insert_test_transaction(txn_id).await;
+
+        // insert_test_transaction goes through Transactions::parse, which assigns original_order
+        // from the row index, so the row starts out with Some(_).
+        let before = env
+            .config()
+            .db()
+            ._get_transaction(txn_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            before.original_order.is_some(),
+            "precondition: the inserted row should carry an original_order"
+        );
+
+        let updates = TransactionUpdates {
+            note: Some("touched".to_string()),
+            ..Default::default()
+        };
+        let args = UpdateTransactionsArgs::new(vec![txn_id], updates).unwrap();
+        update_transactions(env.config(), args).await.unwrap();
+
+        let after = env
+            .config()
+            .db()
+            ._get_transaction(txn_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after.original_order, before.original_order,
+            "update_transactions must preserve original_order"
+        );
+        assert_eq!(after.note, "touched");
+    }
+
+    /// A transaction added locally has no `original_order`, and updating it must not invent one.
+    #[tokio::test]
+    async fn test_update_transactions_leaves_local_rows_unordered() {
+        let env = TestEnv::new().await;
+        env.insert_test_transaction("test-txn-anchor").await;
+
+        let insert_args = InsertTransactionArgs {
+            date: Date::parse("2025-01-20").unwrap(),
+            amount: "-25.50".parse().unwrap(),
+            description: None,
+            account: None,
+            account_number: None,
+            institution: None,
+            month: None,
+            week: None,
+            full_description: None,
+            account_id: None,
+            check_number: None,
+            date_added: None,
+            merchant_name: None,
+            category_hint: None,
+            category: None,
+            note: None,
+            tags: None,
+            categorized_date: None,
+            statement: None,
+            metadata: None,
+            other_fields: Vec::new(),
+        };
+        let inserted = insert_transaction(env.config(), insert_args).await.unwrap();
+        let txn_id = inserted.structure().unwrap().clone();
+
+        let updates = TransactionUpdates {
+            note: Some("touched".to_string()),
+            ..Default::default()
+        };
+        let args = UpdateTransactionsArgs::new(vec![txn_id.clone()], updates).unwrap();
+        update_transactions(env.config(), args).await.unwrap();
+
+        let after = env
+            .config()
+            .db()
+            ._get_transaction(&txn_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after.original_order, None,
+            "a locally-added row should stay unordered"
+        );
     }
 
     #[tokio::test]

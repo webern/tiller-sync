@@ -11,6 +11,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `tiller query` and `tiller schema` now write their results to `stdout` instead of discarding them.
   [#36]
+- `--other-field` on the `insert` and `update` subcommands is now optional and no longer panics when
+  supplied. Repeating it adds one custom column per occurrence. [#41]
+- Negative amounts can now be given as `--amount -12.34` instead of only `--amount=-12.34`.
+- Updating a transaction no longer clears its `original_order`, which had caused updated rows to be
+  written to the bottom of the Transactions tab on the next `sync up`. [#40]
 - Negative amounts can now be given as `--amount -12.34` instead of only `--amount=-12.34`. [#41]
 - `--other-field` on the `insert` and `update` subcommands is now optional and no longer panics when
   supplied. Repeating it adds one custom column per occurrence. [#41]
@@ -96,4 +101,5 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#24]: https://github.com/webern/tiller-sync/issues/24
 [#28]: https://github.com/webern/tiller-sync/issues/28
 [#36]: https://github.com/webern/tiller-sync/issues/36
+[#40]: https://github.com/webern/tiller-sync/issues/40
 [#41]: https://github.com/webern/tiller-sync/issues/41
