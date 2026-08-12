@@ -3,14 +3,18 @@
 use crate::args::{InsertAutoCatArgs, InsertCategoryArgs, InsertTransactionArgs};
 use crate::commands::Out;
 use crate::error::{ErrorType, IntoResult};
-use crate::model::{AutoCat, Category, Transaction};
+use crate::model::{surrogate_for, AutoCat, Category, Transaction};
 use crate::utils::{self, generate_transaction_id};
 use crate::{Config, Result};
+use tracing::debug;
 
 /// Inserts a new transaction into the local SQLite database.
 ///
-/// A unique transaction ID is automatically generated with a `user-` prefix to distinguish it
-/// from Tiller-created transactions. The generated ID is returned on success.
+/// The row is new here by definition, so its primary key is always minted by this function and is
+/// never taken from the caller. What the caller can say, through `args.transaction_id`, is what
+/// *Tiller* calls the transaction — the value bound for the sheet's `Transaction ID` column. That
+/// is a property of the row, like its description, and [`sheet_id`] turns it into a key by the same
+/// rule `sync down` uses. The key that was assigned is returned on success.
 ///
 /// # Arguments
 ///
@@ -22,7 +26,7 @@ use crate::{Config, Result};
 ///
 /// On success, returns an `Out` containing:
 /// - A message indicating the transaction was inserted.
-/// - The generated transaction ID.
+/// - The primary key the row was given.
 ///
 /// # Errors
 ///
@@ -32,12 +36,12 @@ pub async fn insert_transaction(
     config: Config,
     args: InsertTransactionArgs,
 ) -> Result<Out<String>> {
-    // Generate a unique transaction ID
-    let transaction_id = generate_transaction_id();
+    let sheet_id = sheet_id(&args);
 
-    // Build the Transaction object from args
-    let transaction = Transaction {
-        transaction_id: transaction_id.clone(),
+    // Build the Transaction object from args. The key is filled in below, once the row exists to
+    // be fingerprinted.
+    let mut transaction = Transaction {
+        transaction_id: String::new(),
         date: args.date,
         amount: args.amount,
         description: args.description.unwrap_or_default(),
@@ -61,10 +65,10 @@ pub async fn insert_transaction(
         no_name: String::new(),
         other_fields: utils::other_fields_map(args.other_fields),
         original_order: None, // Locally-added rows have no original order
-        // The generated ID is the ID we write to the sheet, so there is no separate sheet value to
-        // preserve.
         original_transaction_id: None,
     };
+
+    let transaction_id = assign_key(&config, &mut transaction, sheet_id.as_deref()).await?;
 
     // Insert into database
     config
@@ -88,6 +92,89 @@ pub async fn insert_transaction(
 
     let message = format!("Inserted transaction with ID: {}", transaction_id);
     Ok(Out::new(message, transaction_id))
+}
+
+/// The `Transaction ID` the caller wants this row to carry in the sheet, if any.
+///
+/// Blank and whitespace-only are read as "none supplied" rather than rejected. A blank column is
+/// what a feed with no IDs of its own produces, so it is a value the sheet legitimately holds — but
+/// there is nothing in it to carry back, which makes it indistinguishable from saying nothing.
+fn sheet_id(args: &InsertTransactionArgs) -> Option<String> {
+    args.transaction_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+}
+
+/// Gives the new row its primary key, and returns it.
+///
+/// This is the same rule [`crate::model::resolve_transaction_ids`] applies to every row arriving
+/// from the sheet, asked of one row against the datastore rather than of a whole tab against
+/// itself:
+///
+/// - **No sheet ID.** Tiller has never seen this transaction, so there is nothing to preserve.
+///   The row gets a fresh `user-` key, and because `original_transaction_id` stays `None` that key
+///   is also what `sync up` writes into the `Transaction ID` column — marking the row in the sheet
+///   as one Tiller did not create.
+/// - **A sheet ID no local row is using.** It can serve as the key directly, so it does, and the
+///   sheet gets its own value back untouched.
+/// - **A sheet ID some local row is already using.** It cannot be a key twice. The row gets a
+///   surrogate and the sheet's value moves to `original_transaction_id`, from where `sync up`
+///   writes it out. This is not an error: `split:[1]` markers repeat across rows, so a sheet that
+///   reuses an ID is ordinary, and refusing here would only push the user back to raw SQL.
+///
+/// The surrogate is content-derived rather than random so that it matches the one `sync down` would
+/// compute for the same row. Otherwise uploading this row and downloading it again would change its
+/// key, and a changed key reads as a delete plus an insert.
+async fn assign_key(
+    config: &Config,
+    transaction: &mut Transaction,
+    sheet_id: Option<&str>,
+) -> Result<String> {
+    let Some(sheet_id) = sheet_id else {
+        let key = generate_transaction_id();
+        transaction.transaction_id = key.clone();
+        return Ok(key);
+    };
+
+    let db = config.db();
+
+    if !db
+        .transaction_id_exists(sheet_id)
+        .await
+        .pub_result(ErrorType::Database)?
+    {
+        transaction.transaction_id = sheet_id.to_string();
+        return Ok(sheet_id.to_string());
+    }
+
+    // Taken. Keep the sheet's value as data and find the first free occurrence, exactly as a
+    // sync down would number a run of identical rows.
+    transaction.original_transaction_id = Some(sheet_id.to_string());
+
+    for occurrence in 0..u32::MAX {
+        let candidate = surrogate_for(transaction, occurrence);
+        if !db
+            .transaction_id_exists(&candidate)
+            .await
+            .pub_result(ErrorType::Database)?
+        {
+            transaction.transaction_id = candidate.clone();
+            debug!(
+                "Transaction ID {sheet_id:?} is already in use locally; the new row is keyed \
+                 {candidate} and the sheet keeps {sheet_id:?}"
+            );
+            return Ok(candidate);
+        }
+    }
+
+    // Unreachable in practice: it would take four billion byte-identical rows.
+    Err(anyhow::anyhow!(
+        "Cannot insert transaction: no surrogate ID is available for a row with Transaction ID \
+         '{sheet_id}'."
+    ))
+    .pub_result(ErrorType::Database)
 }
 
 /// Inserts a new category into the local SQLite database.
@@ -207,14 +294,213 @@ pub async fn insert_autocat(config: Config, args: InsertAutoCatArgs) -> Result<O
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Amount;
+    use crate::model::{resolve_transaction_ids, Amount, Item, Transactions};
     use crate::test::TestEnv;
+
+    /// Args for a transaction, stating only the fields a test cares about.
+    fn args(transaction_id: Option<&str>, description: &str, cents: i64) -> InsertTransactionArgs {
+        InsertTransactionArgs {
+            transaction_id: transaction_id.map(str::to_string),
+            date: "2025-01-20".try_into().unwrap(),
+            amount: Amount::new(rust_decimal::Decimal::new(cents, 2)),
+            description: Some(description.to_string()),
+            account: Some("Checking".to_string()),
+            institution: Some("Test Bank".to_string()),
+            account_number: None,
+            month: None,
+            week: None,
+            full_description: None,
+            account_id: None,
+            check_number: None,
+            date_added: None,
+            merchant_name: None,
+            category_hint: None,
+            category: None,
+            note: None,
+            tags: None,
+            categorized_date: None,
+            statement: None,
+            metadata: None,
+            other_fields: Default::default(),
+        }
+    }
+
+    /// The value `sync up` would write into the sheet's `Transaction ID` column for this row.
+    async fn sheet_value(env: &TestEnv, key: &str) -> String {
+        env.config()
+            .db()
+            ._get_transaction(key)
+            .await
+            .unwrap()
+            .expect("the row should be in the datastore")
+            .get_by_header("Transaction ID")
+    }
+
+    /// The ordinary case: Tiller has never seen this transaction, so there is no sheet ID to carry
+    /// and the generated key is what the sheet is told.
+    #[tokio::test]
+    async fn test_omitted_id_generates_a_key_and_writes_it_to_the_sheet() {
+        let env = TestEnv::new().await;
+
+        let key = insert_transaction(env.config(), args(None, "Coffee", -450))
+            .await
+            .unwrap()
+            .structure()
+            .unwrap()
+            .to_string();
+
+        assert!(key.starts_with("user-"), "expected a local key, got: {key}");
+        assert_eq!(sheet_value(&env, &key).await, key);
+    }
+
+    /// A Tiller ID that no local row is using can serve as the key, so it does, and the sheet gets
+    /// its own value back untouched.
+    ///
+    /// See https://github.com/webern/tiller-sync/issues/39
+    #[tokio::test]
+    async fn test_free_sheet_id_becomes_the_key() {
+        let env = TestEnv::new().await;
+        let tiller_id = "69112cec0a57f52108456b88";
+
+        let key = insert_transaction(env.config(), args(Some(tiller_id), "Coffee", -450))
+            .await
+            .unwrap()
+            .structure()
+            .unwrap()
+            .to_string();
+
+        assert_eq!(key, tiller_id);
+        assert_eq!(sheet_value(&env, &key).await, tiller_id);
+        let stored = env.config().db()._get_transaction(&key).await.unwrap();
+        assert_eq!(stored.unwrap().original_transaction_id, None);
+    }
+
+    /// A Tiller ID that some local row already uses cannot be a key twice, so the new row gets a
+    /// surrogate and the sheet keeps the Tiller value. Reusing an ID is not an error: `split:[1]`
+    /// markers repeat across rows, so sheets that reuse an ID are ordinary.
+    #[tokio::test]
+    async fn test_taken_sheet_id_is_kept_as_data_not_rejected() {
+        let env = TestEnv::new().await;
+        let tiller_id = "split:[1]";
+
+        let first = insert_transaction(env.config(), args(Some(tiller_id), "Dinner", -6000))
+            .await
+            .unwrap()
+            .structure()
+            .unwrap()
+            .to_string();
+        let second = insert_transaction(env.config(), args(Some(tiller_id), "Tip", -1200))
+            .await
+            .unwrap()
+            .structure()
+            .unwrap()
+            .to_string();
+
+        assert_eq!(first, tiller_id);
+        assert!(
+            second.starts_with("user-"),
+            "the second row needs a surrogate, got: {second}"
+        );
+        // Both rows still tell the sheet the same thing, which is what the sheet had.
+        assert_eq!(sheet_value(&env, &first).await, tiller_id);
+        assert_eq!(sheet_value(&env, &second).await, tiller_id);
+    }
+
+    /// The point of the surrogate being content-derived rather than random: `insert` and `sync
+    /// down` have to agree, or uploading a row and downloading it again would change its key, and a
+    /// changed key reads as a delete plus an insert.
+    #[tokio::test]
+    async fn test_insert_surrogate_matches_what_sync_down_would_assign() {
+        let env = TestEnv::new().await;
+        let tiller_id = "split:[1]";
+
+        insert_transaction(env.config(), args(Some(tiller_id), "Dinner", -6000))
+            .await
+            .unwrap();
+        let inserted = insert_transaction(env.config(), args(Some(tiller_id), "Tip", -1200))
+            .await
+            .unwrap()
+            .structure()
+            .unwrap()
+            .to_string();
+
+        // The same two rows as they would arrive from the sheet after a `sync up`.
+        let mut from_sheet = Transactions::parse(
+            vec![
+                vec![
+                    "Transaction ID",
+                    "Date",
+                    "Description",
+                    "Amount",
+                    "Account",
+                    "Institution",
+                ],
+                vec![
+                    tiller_id,
+                    "2025-01-20",
+                    "Dinner",
+                    "-60.00",
+                    "Checking",
+                    "Test Bank",
+                ],
+                vec![
+                    tiller_id,
+                    "2025-01-20",
+                    "Tip",
+                    "-12.00",
+                    "Checking",
+                    "Test Bank",
+                ],
+            ],
+            Vec::<Vec<&str>>::new(),
+        )
+        .unwrap();
+        resolve_transaction_ids(&mut from_sheet);
+
+        assert_eq!(
+            from_sheet.data()[1].transaction_id,
+            inserted,
+            "sync down must key the round-tripped row exactly as insert keyed it"
+        );
+    }
+
+    /// A blank column is what a feed with no IDs of its own produces. There is nothing in it to
+    /// carry back, so it says the same thing as omitting the argument rather than being an error.
+    #[tokio::test]
+    async fn test_blank_sheet_id_is_the_same_as_omitting_it() {
+        let env = TestEnv::new().await;
+
+        let key = insert_transaction(env.config(), args(Some("   "), "Coffee", -450))
+            .await
+            .unwrap()
+            .structure()
+            .unwrap()
+            .to_string();
+
+        assert!(key.starts_with("user-"), "expected a local key, got: {key}");
+    }
+
+    /// Surrounding whitespace is a typo, not part of the value.
+    #[tokio::test]
+    async fn test_sheet_id_is_trimmed() {
+        let env = TestEnv::new().await;
+
+        let key = insert_transaction(env.config(), args(Some("  abc123  "), "Coffee", -450))
+            .await
+            .unwrap()
+            .structure()
+            .unwrap()
+            .to_string();
+
+        assert_eq!(key, "abc123");
+    }
 
     #[tokio::test]
     async fn test_insert_transaction_success() {
         let env = TestEnv::new().await;
 
         let args = InsertTransactionArgs {
+            transaction_id: None,
             date: "2025-01-20".try_into().unwrap(),
             amount: Amount::new(rust_decimal::Decimal::new(-1250, 2)), // -12.50
             description: Some("Test Purchase".to_string()),
@@ -268,6 +554,7 @@ mod tests {
         env.insert_test_transaction("temp-txn").await;
 
         let args = InsertTransactionArgs {
+            transaction_id: None,
             date: "2025-01-20".try_into().unwrap(),
             amount: Amount::new(rust_decimal::Decimal::new(-500, 2)), // -5.00
             description: Some("Coffee".to_string()),
@@ -313,6 +600,7 @@ mod tests {
         let env = TestEnv::new().await;
 
         let args = InsertTransactionArgs {
+            transaction_id: None,
             date: "2025-01-20".try_into().unwrap(),
             amount: Amount::new(rust_decimal::Decimal::new(-500, 2)),
             description: Some("Test".to_string()),
@@ -352,6 +640,7 @@ mod tests {
         let env = TestEnv::new().await;
 
         let make_args = || InsertTransactionArgs {
+            transaction_id: None,
             date: "2025-01-20".try_into().unwrap(),
             amount: Amount::new(rust_decimal::Decimal::new(-100, 2)),
             description: None,
@@ -392,6 +681,7 @@ mod tests {
 
         // Only required fields: date and amount
         let args = InsertTransactionArgs {
+            transaction_id: None,
             date: "2025-01-20".try_into().unwrap(),
             amount: Amount::new(rust_decimal::Decimal::new(10000, 2)), // 100.00 (positive = income)
             description: None,

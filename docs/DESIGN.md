@@ -538,6 +538,56 @@ institution — plus the occurrence number within a group of otherwise-identical
   `std::hash::DefaultHasher`, whose algorithm is explicitly allowed to change between Rust releases.
   These hashes are persisted as primary keys, so the algorithm is part of the on-disk format.
 
+##### The two jobs of `transaction_id`
+
+The `transaction_id` field carries two things that are usually, but not always, the same value:
+
+1. **The local primary key** — how the datastore, and every CRUD command, addresses the row.
+2. **The `Transaction ID` cell** — what `sync up` writes into that column, and therefore what Tiller
+   reads when it next looks at the sheet.
+
+They come apart whenever the sheet's value cannot be a primary key, which is the case described
+above. `original_transaction_id` holds job 2 when that happens, and `get_by_header` returns it in
+preference to the key. Keeping the distinction in mind is what makes the rest of this section, and
+the behavior of `insert transaction`, follow.
+
+##### Inserting a row Tiller already knows about
+
+`insert transaction` creates a row in the local datastore. That row is new here by definition, so
+its **primary key is always assigned by the command** and is never supplied by the caller.
+
+What the caller can supply, as `transaction_id`, is job 2: the value bound for the sheet's
+`Transaction ID` column. It is data about the row, in the same sense that the description and the
+amount are. Two situations call for it:
+
+- Restoring a row that was deleted from the datastore but still exists in the sheet.
+- Entering a transaction whose Tiller ID is known from elsewhere.
+
+In both cases the point is that `sync up` must write Tiller's own ID into the sheet. `sync up` is a
+clear-and-replace, so the sheet ends up holding exactly what the datastore holds; a row that went up
+under a generated `user-` ID would leave Tiller unable to match the transaction against its own
+record, and Tiller's copy would then sit in the sheet alongside it.
+
+The supplied value is turned into a key by **the same rule `sync down` applies** to every row
+arriving from the sheet:
+
+| Supplied `transaction_id`      | Primary key                | `Transaction ID` written on sync up |
+|--------------------------------|----------------------------|-------------------------------------|
+| omitted, or blank              | generated `user-` ID       | that generated ID                   |
+| a value no local row is using  | the value itself           | the value                           |
+| a value some local row is using| a content-derived surrogate| the value                           |
+
+Consequences worth stating, because each is a case where the obvious alternative is wrong:
+
+- **A repeated value is not an error.** Real sheets repeat IDs — `split:[1]` markers do it on every
+  split row — so refusing here would send the user back to raw SQL for the case the feature exists
+  to serve.
+- **A blank value is not an error.** It says the same thing as omitting the argument: there is no
+  Tiller ID to carry.
+- **The surrogate is content-derived, not random.** It is the surrogate `sync down` would compute
+  for the same row, so uploading the row and downloading it again leaves its key alone. A key that
+  changed would read as a delete followed by an insert.
+
 ## Database Schema
 
 The SQLite database contains the following tables. See `src/db/migrations/` for exact DDL.

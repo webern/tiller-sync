@@ -171,6 +171,21 @@ pub(crate) fn resolve_transaction_ids(transactions: &mut Transactions) -> IdRepo
     report
 }
 
+/// The surrogate a row would be given if its `Transaction ID` could not be a primary key.
+///
+/// [`resolve_transaction_ids`] is driven by a whole sheet, because deciding whether a value is
+/// duplicated means looking at every other row. A row inserted locally has no sheet to be weighed
+/// against, so `insert transaction` asks the same question of the datastore and then comes here for
+/// the key. Both paths therefore derive identical surrogates from identical rows, which is what
+/// stops a locally-inserted row from being re-keyed by the `sync down` that follows the `sync up`
+/// which uploaded it.
+///
+/// `occurrence` distinguishes rows that are identical in content; the caller supplies the first
+/// value not already taken.
+pub(crate) fn surrogate_for(transaction: &Transaction, occurrence: u32) -> String {
+    surrogate_id(&fingerprint(transaction), occurrence)
+}
+
 /// The row content that a surrogate ID is derived from.
 ///
 /// Only fields that come from the bank are used. Anything the user can edit locally, such as the

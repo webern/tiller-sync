@@ -594,6 +594,18 @@ impl Db {
         Ok(())
     }
 
+    /// Whether a row already uses this value as its primary key.
+    pub(crate) async fn transaction_id_exists(&self, id: &str) -> Res<bool> {
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM transactions WHERE transaction_id = ?")
+                .bind(id)
+                .fetch_one(&self.pool)
+                .await
+                .context("Failed to look up transaction ID")?;
+
+        Ok(count > 0)
+    }
+
     /// Retrieves a transaction by its ID.
     /// Used only in tests currently; will be part of query interface later.
     pub(crate) async fn _get_transaction(&self, id: &str) -> Res<Option<Transaction>> {

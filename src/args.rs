@@ -681,8 +681,10 @@ impl InsertArgs {
 pub enum InsertSubcommand {
     /// Inserts a new transaction into the local SQLite database.
     ///
-    /// A unique transaction ID is automatically generated with a `user-` prefix to distinguish it
-    /// from Tiller-created transactions. The generated ID is returned on success.
+    /// The row's primary key is always generated here and is returned on success. Pass
+    /// `--transaction-id` to say what Tiller calls this transaction, which is the value written to
+    /// the sheet's `Transaction ID` column on the next `sync up`; leave it off and the generated
+    /// `user-` key is written there instead, marking the row as one Tiller did not create.
     ///
     /// The `date` and `amount` fields are required. All other fields are optional.
     ///
@@ -711,8 +713,9 @@ pub enum InsertSubcommand {
 
 /// Args for the `tiller insert transaction` command.
 ///
-/// Inserts a new transaction into the local SQLite database. A unique transaction ID is
-/// automatically generated with a `user-` prefix.
+/// Inserts a new transaction into the local SQLite database. The row's primary key is always
+/// generated here; `transaction_id` says what Tiller calls the transaction, not what the local key
+/// should be.
 ///
 /// The `date` and `amount` fields are required. All other fields are optional.
 ///
@@ -726,6 +729,24 @@ pub enum InsertSubcommand {
 // rather than as an unknown flag.
 #[command(allow_negative_numbers = true)]
 pub struct InsertTransactionArgs {
+    /// What Tiller calls this transaction: the value to put in the sheet's `Transaction ID` column
+    /// on the next `sync up`. This is data about the row, not the row's local primary key — the
+    /// primary key is always generated here and never taken from this field.
+    ///
+    /// Omit it for a transaction Tiller has never seen. The generated `user-` key is then written
+    /// to the sheet as well, marking the row as one Tiller did not create.
+    ///
+    /// Supply it when you are recording a transaction Tiller already knows about — restoring a row
+    /// deleted from the datastore, or entering one whose Tiller ID you have in hand. Writing
+    /// Tiller's own ID back is what keeps the sheet in step with Tiller's record instead of
+    /// carrying a `user-` row alongside Tiller's own copy of the same transaction.
+    ///
+    /// Blank or whitespace-only is the same as omitting it. The value need not be unique: real
+    /// sheets repeat IDs, and a repeat is handled the same way `sync down` handles one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub transaction_id: Option<String>,
+
     /// The posted date (when the transaction cleared) or transaction date (when the transaction
     /// occurred). Posted date takes priority except for investment accounts. **Required.**
     #[arg(long)]

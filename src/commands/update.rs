@@ -252,6 +252,7 @@ mod tests {
         env.insert_test_transaction("test-txn-anchor").await;
 
         let insert_args = InsertTransactionArgs {
+            transaction_id: None,
             date: Date::parse("2025-01-20").unwrap(),
             amount: "-25.50".parse().unwrap(),
             description: None,

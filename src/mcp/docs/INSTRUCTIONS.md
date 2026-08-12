@@ -250,7 +250,7 @@ Retrieves database schema information to help understand the data structure.
 
 | Column           | Type    | Description                                          |
 |------------------|---------|------------------------------------------------------|
-| `transaction_id` | TEXT    | Unique ID (Tiller-assigned or `user-` prefixed)      |
+| `transaction_id` | TEXT    | The local primary key (the sheet's ID, or `user-` prefixed) |
 | `original_transaction_id` | TEXT | The sheet's own ID when it was blank or duplicated; NULL otherwise |
 | `date`           | TEXT    | Transaction date (YYYY-MM-DD)                        |
 | `description`    | TEXT    | Cleaned merchant description                         |

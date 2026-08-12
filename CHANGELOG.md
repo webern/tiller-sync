@@ -22,6 +22,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `sync down` no longer aborts on rows whose `Transaction ID` is blank or duplicated, which is
   common in real sheets. Such rows are given a stable surrogate `user-` ID for local use, and the
   sheet's own value is written back unchanged on `sync up`. [#37]
+- `insert transaction` can now say what Tiller calls the transaction. Its `transaction_id` argument
+  sets the value written to the sheet's `Transaction ID` column, so a row Tiller already knows about
+  keeps Tiller's ID instead of going up under a generated `user-` one that Tiller cannot match
+  against its own record. The row's local primary key is still always generated. [#39]
 
 ### Added
 
@@ -114,5 +118,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#35]: https://github.com/webern/tiller-sync/issues/35
 [#36]: https://github.com/webern/tiller-sync/issues/36
 [#37]: https://github.com/webern/tiller-sync/issues/37
+[#39]: https://github.com/webern/tiller-sync/issues/39
 [#40]: https://github.com/webern/tiller-sync/issues/40
 [#41]: https://github.com/webern/tiller-sync/issues/41

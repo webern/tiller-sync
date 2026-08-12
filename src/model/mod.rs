@@ -19,7 +19,7 @@ pub(crate) use mapping::Mapping;
 pub(crate) use row_col::RowCol;
 use serde::{Deserialize, Serialize};
 pub use transaction::{Transaction, TransactionColumn, TransactionUpdates, Transactions};
-pub(crate) use transaction_ids::resolve_transaction_ids;
+pub(crate) use transaction_ids::{resolve_transaction_ids, surrogate_for};
 
 /// Represents all the sheets of interest from a tiller Google sheet.
 #[derive(Default, Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
