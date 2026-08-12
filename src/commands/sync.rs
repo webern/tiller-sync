@@ -184,8 +184,7 @@ pub async fn sync_up(
         .await
         .pub_result(ErrorType::Sync)?;
 
-    // Formula preservation used to fail silently, flattening every formula to its last computed
-    // value while still reporting success. Read the formulas back and say what actually landed.
+    // Preserve formulas if requested.
     let formula_summary = if preserve_formulas {
         if counts.formulas != formulas_written {
             warn!(
