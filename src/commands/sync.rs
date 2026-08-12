@@ -764,8 +764,7 @@ mod tests {
         );
     }
 
-    /// `--formulas preserve` reported success while flattening every formula to its last computed
-    /// value: the mode was validated and then dropped on the floor before the write.
+    /// `--formulas preserve` now actually preserves formulas.
     ///
     /// See https://github.com/webern/tiller-sync/issues/35
     #[tokio::test]
