@@ -11,9 +11,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `tiller query` and `tiller schema` now write their results to `stdout` instead of discarding them.
   [#36]
+- Negative amounts can now be given as `--amount -12.34` instead of only `--amount=-12.34`. [#41]
 - `--other-field` on the `insert` and `update` subcommands is now optional and no longer panics when
   supplied. Repeating it adds one custom column per occurrence. [#41]
-- Negative amounts can now be given as `--amount -12.34` instead of only `--amount=-12.34`.
 
 ### Changed
 
