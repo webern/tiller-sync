@@ -365,6 +365,9 @@ pub enum UpdateSubcommand {
 ///
 /// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
 #[derive(Debug, Parser, Clone, Serialize, Deserialize, JsonSchema)]
+// Amounts are negative for expenses, so `--amount -12.34` has to be read as a value
+// rather than as an unknown flag.
+#[command(allow_negative_numbers = true)]
 pub struct UpdateTransactionsArgs {
     /// One or more transaction IDs to update. All specified transactions will receive the same
     /// updates.
@@ -459,6 +462,9 @@ impl UpdateCategoriesArgs {
 ///
 /// Changes are made locally only. Use `sync up` to upload local changes to the Google Sheet.
 #[derive(Debug, Parser, Clone, Serialize, Deserialize, JsonSchema)]
+// Amounts are negative for expenses, so `--amount -12.34` has to be read as a value
+// rather than as an unknown flag.
+#[command(allow_negative_numbers = true)]
 pub struct UpdateAutoCatsArgs {
     /// One or more AutoCat rule IDs to update. All specified rules will receive the same
     /// updates.
@@ -716,6 +722,9 @@ pub enum InsertSubcommand {
 /// columns: <https://help.tiller.com/en/articles/432681-transactions-sheet-columns>
 #[derive(Debug, Clone, Parser, Serialize, Deserialize, JsonSchema)]
 #[schemars(title = "InsertTransactionArgs")]
+// Amounts are negative for expenses, so `--amount -12.34` has to be read as a value
+// rather than as an unknown flag.
+#[command(allow_negative_numbers = true)]
 pub struct InsertTransactionArgs {
     /// The posted date (when the transaction cleared) or transaction date (when the transaction
     /// occurred). Posted date takes priority except for investment accounts. **Required.**
@@ -824,9 +833,17 @@ pub struct InsertTransactionArgs {
     pub metadata: Option<String>,
 
     /// Custom columns not part of the standard Tiller schema.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    #[arg(long = "other-field", value_parser = utils::parse_key_val)]
-    pub other_fields: BTreeMap<String, String>,
+    ///
+    /// On the command line, repeat `--other-field Name=Value` once per column. Over MCP this is a
+    /// JSON object, e.g. `{"My Column": "value"}`.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        with = "crate::utils::other_fields"
+    )]
+    #[schemars(with = "BTreeMap<String, String>")]
+    #[arg(long = "other-field", value_name = "NAME=VALUE", value_parser = utils::parse_key_val)]
+    pub other_fields: Vec<(String, String)>,
 }
 
 /// Args for the `tiller insert category` command.
@@ -866,9 +883,17 @@ pub struct InsertCategoryArgs {
     pub hide_from_reports: Option<String>,
 
     /// Custom columns not part of the standard Tiller schema.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    #[arg(long = "other-field", value_parser = utils::parse_key_val)]
-    pub other_fields: BTreeMap<String, String>,
+    ///
+    /// On the command line, repeat `--other-field Name=Value` once per column. Over MCP this is a
+    /// JSON object, e.g. `{"My Column": "value"}`.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        with = "crate::utils::other_fields"
+    )]
+    #[schemars(with = "BTreeMap<String, String>")]
+    #[arg(long = "other-field", value_name = "NAME=VALUE", value_parser = utils::parse_key_val)]
+    pub other_fields: Vec<(String, String)>,
 }
 
 /// Args for the `tiller insert autocat` command.
@@ -885,6 +910,9 @@ pub struct InsertCategoryArgs {
 /// <https://help.tiller.com/en/articles/3792984-autocat-for-google-sheets>
 #[derive(Debug, Clone, Parser, Serialize, Deserialize, JsonSchema)]
 #[schemars(title = "InsertAutoCatArgs")]
+// Amounts are negative for expenses, so `--amount -12.34` has to be read as a value
+// rather than as an unknown flag.
+#[command(allow_negative_numbers = true)]
 pub struct InsertAutoCatArgs {
     /// The category to assign when this rule matches. This is an override column - when filter
     /// conditions match, this category value gets applied to matching transactions. Must reference
@@ -954,9 +982,17 @@ pub struct InsertAutoCatArgs {
     pub amount_contains: Option<String>,
 
     /// Custom columns not part of the standard Tiller schema.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    #[arg(long = "other-field", value_parser = utils::parse_key_val)]
-    pub other_fields: BTreeMap<String, String>,
+    ///
+    /// On the command line, repeat `--other-field Name=Value` once per column. Over MCP this is a
+    /// JSON object, e.g. `{"My Column": "value"}`.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        with = "crate::utils::other_fields"
+    )]
+    #[schemars(with = "BTreeMap<String, String>")]
+    #[arg(long = "other-field", value_name = "NAME=VALUE", value_parser = utils::parse_key_val)]
+    pub other_fields: Vec<(String, String)>,
 }
 
 fn default_tiller_home() -> DisplayPath {
@@ -1018,5 +1054,198 @@ impl DisplayPath {
 
     pub fn path(&self) -> &Path {
         &self.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    /// Every subcommand's argument definition has to be internally consistent, otherwise clap
+    /// panics at parse time rather than at build time. `--other-field` was declared as a
+    /// `BTreeMap<String, String>` with a value parser that produced a `(String, String)`, which
+    /// clap could not reconcile.
+    ///
+    /// See https://github.com/webern/tiller-sync/issues/41
+    #[test]
+    fn test_arg_definitions_are_valid() {
+        <Args as CommandFactory>::command().debug_assert();
+    }
+
+    fn parse(args: &[&str]) -> Args {
+        Args::try_parse_from(args).unwrap()
+    }
+
+    /// `--other-field` is conceptually optional, and the MCP path has always treated it that way.
+    /// The CLI used to reject every invocation that left it off.
+    #[test]
+    fn test_other_field_is_optional() {
+        let args = parse(&[
+            "tiller",
+            "update",
+            "transactions",
+            "--ids",
+            "abc123",
+            "--note",
+            "hello",
+        ]);
+        let Command::Update(update) = args.command() else {
+            panic!("expected an update command");
+        };
+        let UpdateSubcommand::Transactions(txns) = update.entity() else {
+            panic!("expected a transactions subcommand");
+        };
+        assert!(txns.updates().other_fields.is_empty());
+        assert_eq!(txns.updates().note.as_deref(), Some("hello"));
+    }
+
+    /// Supplying `--other-field` used to panic inside clap. It must parse, and repeating it must
+    /// accumulate rather than overwrite.
+    #[test]
+    fn test_other_field_accumulates() {
+        let args = parse(&[
+            "tiller",
+            "update",
+            "transactions",
+            "--ids",
+            "abc123",
+            "--other-field",
+            "My Column=one",
+            "--other-field",
+            "Another=two",
+        ]);
+        let Command::Update(update) = args.command() else {
+            panic!("expected an update command");
+        };
+        let UpdateSubcommand::Transactions(txns) = update.entity() else {
+            panic!("expected a transactions subcommand");
+        };
+        assert_eq!(
+            txns.updates().other_fields,
+            vec![
+                ("My Column".to_string(), "one".to_string()),
+                ("Another".to_string(), "two".to_string()),
+            ]
+        );
+    }
+
+    /// The same argument exists on `insert category` and `update autocats`, which had the same
+    /// defect.
+    #[test]
+    fn test_other_field_on_insert_and_autocat() {
+        let args = parse(&[
+            "tiller",
+            "insert",
+            "category",
+            "--name",
+            "Groceries",
+            "--other-field",
+            "Custom=x",
+        ]);
+        let Command::Insert(insert) = args.command() else {
+            panic!("expected an insert command");
+        };
+        let InsertSubcommand::Category(cat) = insert.entity() else {
+            panic!("expected a category subcommand");
+        };
+        assert_eq!(
+            cat.other_fields,
+            vec![("Custom".to_string(), "x".to_string())]
+        );
+
+        let args = parse(&[
+            "tiller",
+            "update",
+            "autocats",
+            "--ids",
+            "1",
+            "--other-field",
+            "Custom=y",
+        ]);
+        let Command::Update(update) = args.command() else {
+            panic!("expected an update command");
+        };
+        let UpdateSubcommand::Autocats(autocats) = update.entity() else {
+            panic!("expected an autocats subcommand");
+        };
+        assert_eq!(
+            autocats.updates().other_fields,
+            vec![("Custom".to_string(), "y".to_string())]
+        );
+    }
+
+    /// A malformed pair should be a clean parse error rather than a panic.
+    #[test]
+    fn test_other_field_requires_name_equals_value() {
+        let result = Args::try_parse_from([
+            "tiller",
+            "update",
+            "transactions",
+            "--ids",
+            "abc123",
+            "--other-field",
+            "no-equals-sign",
+        ]);
+        assert!(result.is_err(), "a pair without '=' should be rejected");
+    }
+
+    /// Expenses are negative, so a bare `--amount -12.34` must be read as a value.
+    #[test]
+    fn test_negative_amounts_are_values_not_flags() {
+        let args = parse(&[
+            "tiller",
+            "insert",
+            "transaction",
+            "--date",
+            "2025-01-20",
+            "--amount",
+            "-25.50",
+        ]);
+        let Command::Insert(insert) = args.command() else {
+            panic!("expected an insert command");
+        };
+        let InsertSubcommand::Transaction(txn) = insert.entity() else {
+            panic!("expected a transaction subcommand");
+        };
+        assert_eq!(txn.amount.to_string(), "-25.50");
+    }
+
+    /// `other_fields` is a `Vec` so that clap can accumulate repeated occurrences, but the MCP
+    /// wire format and JSON schema must stay a plain object.
+    #[test]
+    fn test_other_fields_round_trips_as_a_json_object() {
+        let json = serde_json::json!({
+            "name": "Groceries",
+            "other_fields": {"Custom": "x", "Another": "y"}
+        });
+        let args: InsertCategoryArgs = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(
+            args.other_fields,
+            vec![
+                ("Another".to_string(), "y".to_string()),
+                ("Custom".to_string(), "x".to_string()),
+            ],
+            "a JSON object should deserialize into name/value pairs"
+        );
+        assert_eq!(
+            serde_json::to_value(&args).unwrap(),
+            json,
+            "serializing must produce the same JSON object it was parsed from"
+        );
+    }
+
+    /// The generated MCP tool schema must describe `other_fields` as an object of strings.
+    #[test]
+    fn test_other_fields_json_schema_is_an_object() {
+        let schema = serde_json::to_value(schemars::schema_for!(InsertTransactionArgs)).unwrap();
+        let other_fields = schema
+            .pointer("/properties/other_fields")
+            .expect("the schema should describe other_fields");
+        assert_eq!(
+            other_fields.get("type").and_then(|t| t.as_str()),
+            Some("object"),
+            "other_fields should be an object in the schema, got: {other_fields}"
+        );
     }
 }
