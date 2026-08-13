@@ -733,10 +733,6 @@ Every tool is callable straight away. `instructions` is a convenience, not a pre
 each tool documents its own parameters and behavior in its description, and the concise
 orientation in `ServerInfo.instructions` covers the rest.
 
-**Historical note:** an earlier design gated every tool behind an `initialize_service` call, on the
-theory that agents treat `ServerInfo.instructions` as optional reading. Forcing a help lookup before
-any real work is possible makes the server behave unlike every other MCP server, and it was removed.
-
 ### Tool Responses
 
 For `sync up` and `sync down` tools we return minimal responses: success/failure status and a
