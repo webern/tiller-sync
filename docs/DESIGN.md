@@ -101,6 +101,12 @@ Downloading changes from the Tiller Google Sheet:
 tiller sync down
 ```
 
+Seeing where the two sides stand, without modifying either:
+
+```bash
+tiller status
+```
+
 ### MCP
 
 The `tiller mcp` command launches an MCP server. See the dedicated MCP section later in this
@@ -264,6 +270,9 @@ Generated after successful OAuth consent flow. The file contains:
 
 During the `tiller sync down` call, the following happens.
 
+- The local datastore is compared against the last state both sides agreed on. If it has changes
+  that are not in the sheet, the command errors out and names what would be lost, since downloading
+  would discard them. `--force` proceeds anyway.
 - If the datastore does not exist, it is created.
 - A backup of the SQLite database is created.
 - If more than `backup_copies` of the SQLite database exist, the extras are deleted.
@@ -451,16 +460,64 @@ tiller sync down
 
 # 2. Make local edits in SQLite
 
-# 3. Upload local changes back to sheet
+# 3. See where things stand before syncing
+tiller status
+
+# 4. Upload local changes back to sheet
 tiller sync up
 ```
 
-**Forcing overwrites** (when local is authoritative):
+`sync down` belongs at the *start* of a round of edits, never between editing and `sync up`. It is
+not a refresh: transactions are upserted from the sheet, overwriting local field values, and
+Categories and AutoCat are deleted outright and replaced. `tiller status` is the way to check
+whether the sheet has moved on without downloading it.
+
+**Forcing overwrites** (when one side is authoritative):
 
 ```bash
-# Force upload despite remote changes
+# Discard local edits and take the sheet's contents
+tiller sync down --force
+
+# Overwrite sheet changes made since the last download
 tiller sync up --force
 ```
+
+### Change Detection
+
+Both sync directions and `tiller status` compare against the most recent `sync-down.*.json`
+snapshot, which records the last state both sides agreed on. `sync up` writes a fresh snapshot after
+a successful upload, from the sheet as re-read during verification; without that, every command
+after an upload would keep reporting the edits just uploaded as unsynced.
+
+Rows are compared by their **sheet representation** - the same strings a `sync up` would write.
+Comparing typed fields instead would report differences for values that round-trip through the
+database with a different but equivalent representation, and a check that cries wolf gets ignored.
+Two consequences follow:
+
+- A field with no column in the sheet is not compared. It cannot be uploaded, so a difference in it
+  could never be cleared by a `sync up` and would block `sync down` forever.
+- The unnamed column A that some sheets carry is not compared. It has no database column, so it
+  reads back empty and would make every row look modified.
+
+Transactions and categories are keyed by their primary key. AutoCat rules have no stable identity -
+their synthetic key is reassigned on every `sync down`, since the whole tab is replaced - so they are
+compared as a multiset of rows. Reordering the AutoCat tab is therefore not reported as a change.
+
+### `tiller status`
+
+Reports what has changed on each side since the last sync, modifying neither.
+
+```bash
+# Local and remote changes
+tiller status
+
+# Local changes only; does not read the sheet, so it needs no network or authentication
+tiller status --local-only
+```
+
+Its purpose is to make the two questions answerable separately: "have my local edits been
+uploaded?" and "has the sheet changed since I last downloaded?". The second used to require a
+`sync down`, which is exactly the operation that discards unsynced local edits.
 
 ### Row IDs
 
@@ -815,6 +872,8 @@ tiller schema --include-metadata
 
 Two new MCP tools wrap the CLI commands:
 
+- **sync_status**: Reports local and remote changes since the last sync. Parameters: `local_only`
+  (optional, defaults to false).
 - **query**: Executes arbitrary read-only SQL. Parameters: `sql` (required), `format` (required).
 - **schema**: Returns database schema information. Parameters: `include_metadata` (optional,
   defaults to false).

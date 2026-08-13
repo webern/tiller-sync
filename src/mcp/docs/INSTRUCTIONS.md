@@ -34,13 +34,26 @@ Three types of data are synchronized:
 ## Recommended Workflow
 
 ```
-1. sync_down          <- Download latest data from Google Sheet
-2. [analyze/edit]     <- Work with local SQLite database
-3. sync_up            <- Upload changes back to Google Sheet
+1. sync_status        <- See where things stand
+2. sync_down          <- Download latest data from Google Sheet
+3. [analyze/edit]     <- Work with local SQLite database
+4. sync_up            <- Upload changes back to Google Sheet
 ```
 
-Always run `sync_down` before making local edits to ensure you have the latest data and to
-establish a baseline for conflict detection.
+Run `sync_down` at the **start** of a round of edits, to get fresh data and establish a baseline for
+conflict detection.
+
+**Never run `sync_down` between editing and `sync_up`.** It is not a refresh: transactions are
+upserted from the sheet, overwriting local field values, and Categories and AutoCat are deleted
+outright and replaced. Every recategorization and every locally-added AutoCat rule that has not been
+uploaded is gone.
+
+`sync_down` will refuse to run when the local database has unsynced changes, and will name what
+would be lost. Do not reach for `force=true` to get past that message: it means exactly what it
+says. Run `sync_up` first.
+
+To find out whether the sheet has changed without downloading it, use `sync_status`, which reads the
+sheet but writes nothing.
 
 ## Tool Reference
 
@@ -68,6 +81,22 @@ Downloads data from the Google Sheet to the local SQLite database.
   original_transaction_id IS NOT NULL`
 
 **Caution:** This overwrites local changes. The SQLite backup enables manual recovery if needed.
+
+### `sync_status`
+
+Reports what has changed on each side since the last sync. Modifies nothing.
+
+**Parameters:**
+
+| Parameter    | Type    | Default | Description                                              |
+|--------------|---------|---------|----------------------------------------------------------|
+| `local_only` | boolean | `false` | Report local changes only; do not read the Google Sheet  |
+
+**Returns:** `local` and `remote` counts of rows added, modified, and deleted per tab. `local` is
+what `sync_down` would discard; `remote` is what `sync_up` would overwrite.
+
+Comparison uses each row's sheet representation, so it reports what a sync can actually carry. A
+field that has no column in your sheet cannot be uploaded and is not counted.
 
 ### `sync_up`
 
@@ -143,6 +172,7 @@ Common errors and resolutions:
 
 | Error                              | Cause                               | Resolution                            |
 |------------------------------------|-------------------------------------|---------------------------------------|
+| "The local datastore has changes"  | Unsynced local edits                | Run `sync_up` first, or `force=true`  |
 | "Database has no transactions"     | Empty local database                | Run `sync_down` first                 |
 | "No sync-down backup found"        | Never ran `sync_down`               | Run `sync_down` or use `force=true`   |
 | "Sheet has been modified since..." | Remote changes detected             | Run `sync_down` or use `force=true`   |
@@ -266,7 +296,9 @@ Retrieves database schema information to help understand the data structure.
 
 ## Best Practices
 
-1. **Always sync down first** - Establishes baseline for conflict detection and ensures fresh data
+1. **Sync down at the start of a session, not in the middle of one** - It gives you fresh data and a
+   baseline for conflict detection, but it overwrites unsynced local edits. Use `sync_status` to
+   check the sheet mid-session instead
 2. **Use `formulas=ignore` when uncertain** - Safest option if you don't need formula preservation
 3. **Avoid `force=true` casually** - It bypasses safety checks; use only when intentional
 4. **Use `schema` before complex queries** - Understand the data structure before writing SQL

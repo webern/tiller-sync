@@ -58,7 +58,9 @@ pub async fn main_inner(args: Args) -> Result<()> {
                         .await?
                         .print()
                 }
-                UpDown::Down => commands::sync_down(config, mode).await?.print(),
+                UpDown::Down => commands::sync_down(config, mode, sync_args.force())
+                    .await?
+                    .print(),
             }
         }
 
@@ -133,6 +135,13 @@ pub async fn main_inner(args: Args) -> Result<()> {
         Command::Schema(schema_args) => {
             let config = Config::load(home).await?;
             commands::schema(config, schema_args.clone())
+                .await?
+                .print_data()?
+        }
+
+        Command::Status(status_args) => {
+            let config = Config::load(home).await?;
+            commands::status(config, mode, !status_args.local_only)
                 .await?
                 .print_data()?
         }

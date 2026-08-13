@@ -2,8 +2,8 @@
 
 use crate::args::{
     DeleteAutoCatsArgs, DeleteCategoriesArgs, DeleteTransactionsArgs, InsertAutoCatArgs,
-    InsertCategoryArgs, InsertTransactionArgs, QueryArgs, SchemaArgs, UpdateAutoCatsArgs,
-    UpdateCategoriesArgs, UpdateTransactionsArgs,
+    InsertCategoryArgs, InsertTransactionArgs, QueryArgs, SchemaArgs, StatusArgs,
+    UpdateAutoCatsArgs, UpdateCategoriesArgs, UpdateTransactionsArgs,
 };
 use crate::commands::{self, FormulasMode};
 use crate::mcp::mcp_utils::tool_result;
@@ -15,6 +15,17 @@ use rmcp::{tool, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tracing::info;
+
+/// Parameters for the sync_down tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(title = "SyncDownParams")]
+pub struct SyncDownParams {
+    /// Discard local edits that have not been uploaded to the sheet. Without this, sync_down
+    /// refuses to run when the local database has unsynced changes, so that downloading cannot
+    /// silently destroy them.
+    #[serde(default)]
+    pub force: bool,
+}
 
 /// Parameters for the sync_up tool.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -70,14 +81,53 @@ impl TillerServer {
     ///
     /// # Caution
     ///
-    /// This operation overwrites local changes with sheet data. If you have local modifications
-    /// that haven't been synced up, they will be lost. The SQLite backup allows manual recovery
-    /// if needed.
+    /// This operation overwrites local changes with sheet data. To avoid discarding work, it
+    /// refuses to run when the local database has edits that have not been uploaded, and names
+    /// what would be lost. Run `sync_up` first to upload them, or set `force=true` to discard
+    /// them deliberately. The SQLite backup allows manual recovery if needed.
+    ///
+    /// Use `sync_status` to see whether the sheet has changed without downloading it.
+    ///
+    /// # Parameters
+    ///
+    /// - `force`: Discard local edits that have not been uploaded. Default `false`.
     #[tool]
-    async fn sync_down(&self) -> Result<CallToolResult, McpError> {
-        info!("MCP: sync_down called");
+    async fn sync_down(
+        &self,
+        Parameters(params): Parameters<SyncDownParams>,
+    ) -> Result<CallToolResult, McpError> {
+        info!("MCP: sync_down called with force={}", params.force);
         let config = (*self.config).clone();
-        let out = commands::sync_down(config, self.mode).await;
+        let out = commands::sync_down(config, self.mode, params.force).await;
+        tool_result(out)
+    }
+
+    /// Report what has changed in the local database and in the Google Sheet since the last sync,
+    /// without modifying either.
+    ///
+    /// Use this to decide which way to sync, and to check whether the sheet has moved on without
+    /// running `sync_down` (which would discard unsynced local edits).
+    ///
+    /// # Parameters
+    ///
+    /// - `local_only`: Skip reading the Google Sheet and report local changes only. Reading the
+    ///   sheet needs network access and valid authentication. Default `false`.
+    ///
+    /// # Returns
+    ///
+    /// - `synced_before`: false when no sync has ever run, in which case there is nothing to
+    ///   compare against.
+    /// - `local`: rows added, modified, and deleted locally since the last sync. `sync_down` would
+    ///   discard these.
+    /// - `remote`: the same counts for the Google Sheet. `sync_up` would overwrite these. Absent
+    ///   when `local_only` is true.
+    #[tool]
+    async fn sync_status(
+        &self,
+        Parameters(args): Parameters<StatusArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let config = (*self.config).clone();
+        let out = commands::status(config, self.mode, !args.local_only).await;
         tool_result(out)
     }
 
