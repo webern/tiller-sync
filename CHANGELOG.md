@@ -30,8 +30,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- MCP tools no longer require an `initialize_service` call before they can be used. The tool is
+  replaced by an optional `instructions` tool that returns the same in-depth guide, and the
+  server's `ServerInfo.instructions` is now a concise orientation.
 - Update dependencies, including major-version upgrades of `rmcp` (0.12 to 3) and `sqlx` (0.8 to
   0.9)
+
+### Removed
+
+- The `initialize_service` MCP tool. Use `instructions` instead; it is no longer a precondition for
+  calling anything else.
 
 ## [v0.2.1] - 2025-01-25
 

@@ -266,6 +266,8 @@ Once configured, Claude Code can use the following tools:
 - **insert_transaction** / **update_transactions** / **delete_transactions**: Manage transactions
 - **insert_category** / **update_categories** / **delete_categories**: Manage categories
 - **insert_autocat** / **update_autocats** / **delete_autocats**: Manage AutoCat rules
+- **instructions**: The in-depth usage guide, if the agent wants more than each tool's own
+  description
 
 ### Example Use Cases
 

@@ -3,28 +3,15 @@
 //! This module provides an MCP server that exposes tiller functionality as tools
 //! for AI agent integration. The server communicates via JSON-RPC over stdio.
 
-/// Checks if the server has been initialized and returns an error if not.
-macro_rules! require_init {
-    ($self:expr) => {
-        if !$self.check_initialized().await {
-            return Self::uninitialized();
-        }
-    };
-}
-
 mod mcp_utils;
 mod tools;
 
 use crate::{Config, Mode};
 use rmcp::handler::server::tool::ToolRouter;
-use rmcp::model::{
-    CallToolResult, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo,
-};
+use rmcp::model::{Implementation, ProtocolVersion, ServerCapabilities, ServerInfo};
 use rmcp::transport::stdio;
-use rmcp::ErrorData as McpError;
 use rmcp::{tool_handler, ServerHandler, ServiceExt};
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use tracing::info;
 
 /// The tiller MCP server.
@@ -32,7 +19,6 @@ use tracing::info;
 /// This server exposes tiller sync functionality as MCP tools.
 #[derive(Debug, Clone)]
 pub struct TillerServer {
-    initialized: Arc<Mutex<bool>>,
     mode: Mode,
     config: Arc<Config>,
     tool_router: ToolRouter<TillerServer>,
@@ -42,21 +28,10 @@ impl TillerServer {
     /// Creates a new TillerServer with the given configuration.
     pub fn new(config: Config, mode: Mode) -> Self {
         Self {
-            initialized: Arc::new(Mutex::new(false)),
             mode,
             config: Arc::new(config),
             tool_router: Self::tool_router(),
         }
-    }
-
-    async fn check_initialized(&self) -> bool {
-        *self.initialized.lock().await
-    }
-
-    fn uninitialized() -> Result<CallToolResult, McpError> {
-        Ok(CallToolResult::error(vec![rmcp::model::ContentBlock::text(
-            "You have not yet initialized the service. Please call __initialize_service__ first.",
-        )]))
     }
 }
 
@@ -64,11 +39,10 @@ impl TillerServer {
 impl ServerHandler for TillerServer {
     /// Returns server information sent to the MCP client during initialization.
     ///
-    /// The `instructions` field is intended by the specification to be the primary way to
-    /// communicate the server's purpose and usage to AI agents like Claude Code. This text is shown
-    /// to the AI to help it understand when and how to use this server's tools. However, it has
-    /// been noted that agents tend to consider this reading as optional. We have solved this
-    /// problem by requiring agents to call an `__initialize_service__` tool before anything else.
+    /// The `instructions` field is the specification's way of telling an AI client what this
+    /// server is for. It is deliberately short: the client pays for it in context on every session,
+    /// whether or not tiller ends up being used. The in-depth guide lives behind the `instructions`
+    /// tool, which the agent can call when it wants the detail.
     fn get_info(&self) -> ServerInfo {
         let mut info = ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_instructions(include_str!("docs/INTRO.md"));
@@ -137,7 +111,7 @@ mod tests {
     use tokio::io::duplex;
 
     /// Integration test for the MCP server using an in-memory transport.
-    /// Tests initialize_service, sync_down, and sync_up tools.
+    /// Tests the sync_down, sync_up and update_transactions tools.
     #[tokio::test]
     async fn test_mcp_server_integration() {
         // Create duplex channel - one end for server, one for client
@@ -156,21 +130,8 @@ mod tests {
         // Create MCP client connected to the other end
         let client = ().serve(client_io).await.expect("Failed to create client");
 
-        // Test 1: Call initialize_service tool
-        let init_result = client
-            .call_tool(rmcp::model::CallToolRequestParams::new(
-                "initialize_service",
-            ))
-            .await
-            .expect("initialize_service call failed");
-
-        assert!(
-            !init_result.is_error.unwrap_or(false),
-            "initialize_service returned error: {:?}",
-            init_result.content
-        );
-
-        // Test 2: Call sync_down tool
+        // Test 1: sync_down works without any prior "initialization" call. The server used to
+        // reject every tool until `initialize_service` had been called at least once.
         let sync_down_result = client
             .call_tool(rmcp::model::CallToolRequestParams::new("sync_down"))
             .await
@@ -182,7 +143,7 @@ mod tests {
             sync_down_result.content
         );
 
-        // Test 3: Call sync_up tool with force and formulas params
+        // Test 2: Call sync_up tool with force and formulas params
         let mut args = serde_json::Map::new();
         args.insert("force".into(), serde_json::Value::Bool(true));
         args.insert(
@@ -201,7 +162,7 @@ mod tests {
             sync_up_result.content
         );
 
-        // Test 4: Call update_transaction tool
+        // Test 3: Call update_transaction tool
         // After sync_down, we have transactions in the database. Get one to update.
         let tiller_data = env.config().db().get_tiller_data().await.unwrap();
         let first_txn = &tiller_data.transactions.data()[0];
@@ -244,6 +205,50 @@ mod tests {
             server_result.is_ok(),
             "Server returned error: {:?}",
             server_result
+        );
+    }
+
+    /// The server used to reject every tool call until `initialize_service` had been called,
+    /// which forced a help lookup before any real work could start. Tools are now callable
+    /// straight away, like any other MCP server.
+    #[tokio::test]
+    async fn test_tools_need_no_initialization_call() {
+        let (client_io, server_io) = duplex(4096);
+        let env = TestEnv::new().await;
+        let config = env.config();
+
+        let _server_handle =
+            tokio::spawn(
+                async move { run_server(config, Mode::Testing, Io::Mock(server_io)).await },
+            );
+        let client = ().serve(client_io).await.expect("Failed to create client");
+
+        let tools = client
+            .list_tools(Default::default())
+            .await
+            .expect("Failed to list tools");
+        let names: Vec<&str> = tools.tools.iter().map(|t| t.name.as_ref()).collect();
+
+        assert!(
+            !names.contains(&"initialize_service"),
+            "the initialization tool should be gone, found: {names:?}"
+        );
+        assert!(
+            names.contains(&"instructions"),
+            "the in-depth guide should still be reachable, found: {names:?}"
+        );
+
+        // Every tool must work as the very first call of the session. `schema` is the cheapest one
+        // that touches real state.
+        let result = client
+            .call_tool(rmcp::model::CallToolRequestParams::new("schema"))
+            .await
+            .expect("schema call failed");
+
+        assert!(
+            !result.is_error.unwrap_or(false),
+            "a tool called before anything else should succeed, got: {:?}",
+            result.content
         );
     }
 

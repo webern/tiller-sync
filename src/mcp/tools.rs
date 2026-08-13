@@ -33,14 +33,14 @@ pub struct SyncUpParams {
 
 #[tool_router(vis = "pub(super)")]
 impl TillerServer {
+    /// Return the in-depth usage guide for this server.
+    ///
+    /// Optional. Every tool here documents its own parameters and behavior, so this is only worth
+    /// calling when you want the wider picture: the sync workflow, what each backup file is for,
+    /// how conflict detection and formula handling interact, the database schema, and example
+    /// queries.
     #[tool]
-    /// Initialize the tiller MCP service for this session and return usage instructions. You
-    /// **MUST** call this **ONCE** before using other tools so that you have the full usage
-    /// instructions. You **MAY** call it more than once if you have forgotten the usage
-    /// instructions.
-    async fn initialize_service(&self) -> Result<CallToolResult, McpError> {
-        let mut initialized = self.initialized.lock().await;
-        *initialized = true;
+    async fn instructions(&self) -> Result<CallToolResult, McpError> {
         Ok(CallToolResult::success(vec![
             rmcp::model::ContentBlock::text(include_str!("docs/INSTRUCTIONS.md")),
         ]))
@@ -75,7 +75,6 @@ impl TillerServer {
     /// if needed.
     #[tool]
     async fn sync_down(&self) -> Result<CallToolResult, McpError> {
-        require_init!(self);
         info!("MCP: sync_down called");
         let config = (*self.config).clone();
         let out = commands::sync_down(config, self.mode).await;
@@ -150,8 +149,6 @@ impl TillerServer {
         &self,
         Parameters(params): Parameters<SyncUpParams>,
     ) -> Result<CallToolResult, McpError> {
-        require_init!(self);
-
         info!(
             "MCP: sync_up called with force={}, formulas={}",
             params.force, params.formulas
@@ -205,8 +202,6 @@ impl TillerServer {
         &self,
         Parameters(args): Parameters<UpdateTransactionsArgs>,
     ) -> Result<CallToolResult, McpError> {
-        require_init!(self);
-
         let config = (*self.config).clone();
         let out = commands::update_transactions(config, args).await;
         tool_result(out)
@@ -265,8 +260,6 @@ impl TillerServer {
         &self,
         Parameters(args): Parameters<UpdateCategoriesArgs>,
     ) -> Result<CallToolResult, McpError> {
-        require_init!(self);
-
         let config = (*self.config).clone();
         let out = commands::update_categories(config, args).await;
         tool_result(out)
@@ -327,8 +320,6 @@ impl TillerServer {
         &self,
         Parameters(args): Parameters<UpdateAutoCatsArgs>,
     ) -> Result<CallToolResult, McpError> {
-        require_init!(self);
-
         let config = (*self.config).clone();
         let out = commands::update_autocats(config, args).await;
         tool_result(out)
@@ -381,8 +372,6 @@ impl TillerServer {
         &self,
         Parameters(args): Parameters<DeleteTransactionsArgs>,
     ) -> Result<CallToolResult, McpError> {
-        require_init!(self);
-
         let config = (*self.config).clone();
         let out = commands::delete_transactions(config, args).await;
         tool_result(out)
@@ -442,8 +431,6 @@ impl TillerServer {
         &self,
         Parameters(args): Parameters<DeleteCategoriesArgs>,
     ) -> Result<CallToolResult, McpError> {
-        require_init!(self);
-
         let config = (*self.config).clone();
         let out = commands::delete_categories(config, args).await;
         tool_result(out)
@@ -499,8 +486,6 @@ impl TillerServer {
         &self,
         Parameters(args): Parameters<DeleteAutoCatsArgs>,
     ) -> Result<CallToolResult, McpError> {
-        require_init!(self);
-
         let config = (*self.config).clone();
         let out = commands::delete_autocats(config, args).await;
         tool_result(out)
@@ -559,8 +544,6 @@ impl TillerServer {
         &self,
         Parameters(args): Parameters<InsertTransactionArgs>,
     ) -> Result<CallToolResult, McpError> {
-        require_init!(self);
-
         let config = (*self.config).clone();
         let out = commands::insert_transaction(config, args).await;
         tool_result(out)
@@ -612,8 +595,6 @@ impl TillerServer {
         &self,
         Parameters(args): Parameters<InsertCategoryArgs>,
     ) -> Result<CallToolResult, McpError> {
-        require_init!(self);
-
         let config = (*self.config).clone();
         let out = commands::insert_category(config, args).await;
         tool_result(out)
@@ -692,8 +673,6 @@ impl TillerServer {
         &self,
         Parameters(args): Parameters<InsertAutoCatArgs>,
     ) -> Result<CallToolResult, McpError> {
-        require_init!(self);
-
         let config = (*self.config).clone();
         let out = commands::insert_autocat(config, args).await;
         tool_result(out)
@@ -750,8 +729,6 @@ impl TillerServer {
         &self,
         Parameters(args): Parameters<QueryArgs>,
     ) -> Result<CallToolResult, McpError> {
-        require_init!(self);
-
         let config = (*self.config).clone();
         let out = commands::query(config, args).await;
         tool_result(out)
@@ -820,8 +797,6 @@ impl TillerServer {
         &self,
         Parameters(args): Parameters<SchemaArgs>,
     ) -> Result<CallToolResult, McpError> {
-        require_init!(self);
-
         let config = (*self.config).clone();
         let out = commands::schema(config, args).await;
         tool_result(out)
