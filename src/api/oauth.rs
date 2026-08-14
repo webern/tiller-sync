@@ -53,6 +53,8 @@ impl TokenProvider {
         P1: Into<PathBuf>,
         P2: Into<PathBuf>,
     {
+        require_a_terminal()?;
+
         let secret_path = secret.into();
         let token_path = token.into();
 
@@ -234,6 +236,33 @@ impl TokenProvider {
         self.token.save().await?;
         Ok(self.token())
     }
+}
+
+/// Refuses to start the interactive OAuth flow unless a person is at the keyboard.
+///
+/// The flow opens a browser and then blocks until the user authorizes in it. Started from anywhere
+/// else - a script, a CI job, or an AI agent's shell - it pops a browser window at the user without
+/// warning and then hangs until something times out. That is what an agent reaching for
+/// `tiller auth` after seeing an expired-token error looks like from the user's side, and it is
+/// what makes re-authorization appear to happen on its own.
+///
+/// There is no legitimate non-interactive use of this flow: it cannot complete without a human in a
+/// browser. `tiller auth --verify` is the scriptable command.
+///
+/// See <https://github.com/webern/tiller-sync/issues/34>.
+fn require_a_terminal() -> Res<()> {
+    use std::io::IsTerminal;
+
+    if std::io::stdin().is_terminal() {
+        return Ok(());
+    }
+
+    bail!(
+        "'tiller auth' has to be run by a person at a terminal. It opens a browser and waits for \
+         you to authorize there, so it cannot complete when started by a script, a background \
+         process, or an AI agent. Open a terminal and run 'tiller auth' yourself.\n\n\
+         To check existing credentials without any of that, use 'tiller auth --verify'."
+    )
 }
 
 /// Async HTTP client for OAuth2 requests using reqwest
@@ -437,5 +466,47 @@ async fn receive_oauth_callback(listener: TcpListener, expected_csrf: CsrfToken)
         Some(Ok(code)) => Ok(code),
         Some(Err(e)) => Err(e),
         None => bail!("Failed to receive authorization code"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Tests do not run with a terminal on stdin, which is the same situation an agent's shell or a
+    /// background process is in. The interactive flow must refuse rather than opening a browser at
+    /// the user and then blocking.
+    ///
+    /// See https://github.com/webern/tiller-sync/issues/34
+    #[tokio::test]
+    async fn test_interactive_auth_refuses_without_a_terminal() {
+        let result = TokenProvider::initialize("client_secret.json", "token.json").await;
+
+        let err = result
+            .expect_err("the interactive flow must not start without a terminal")
+            .to_string();
+        assert!(
+            err.contains("terminal"),
+            "the error should explain that a person has to run this, got: {err}"
+        );
+        assert!(
+            err.contains("--verify"),
+            "the error should point at the scriptable alternative, got: {err}"
+        );
+    }
+
+    /// The guard has to come before anything else, or a missing credentials file would be reported
+    /// instead and the real problem would be hidden.
+    #[tokio::test]
+    async fn test_terminal_check_precedes_reading_credentials() {
+        let result =
+            TokenProvider::initialize("/nonexistent/client_secret.json", "/nonexistent/token.json")
+                .await;
+
+        let err = result.expect_err("expected an error").to_string();
+        assert!(
+            err.contains("terminal"),
+            "the terminal check should run first, got: {err}"
+        );
     }
 }

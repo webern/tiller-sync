@@ -35,6 +35,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `tiller auth` refuses to start unless stdin is a terminal. It opens a browser and waits for a
+  person, so run from a script or an AI agent's shell it would pop a browser at the user and then
+  hang. `tiller auth --verify` is unaffected and remains scriptable. [#34]
+- When stored Google credentials do not work, the error now says that a person has to run
+  `tiller auth` in a terminal, and that an assistant should ask the user rather than run it. [#34]
 - Documentation no longer says to "always sync down first". Taken at face value after making local
   edits, that advice reverts every local change. It is now scoped to the start of a round of edits.
   [#38]
@@ -126,6 +131,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 <!-- Issues -->
 [#24]: https://github.com/webern/tiller-sync/issues/24
 [#28]: https://github.com/webern/tiller-sync/issues/28
+[#34]: https://github.com/webern/tiller-sync/issues/34
 [#35]: https://github.com/webern/tiller-sync/issues/35
 [#36]: https://github.com/webern/tiller-sync/issues/36
 [#37]: https://github.com/webern/tiller-sync/issues/37

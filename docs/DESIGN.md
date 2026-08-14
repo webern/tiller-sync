@@ -77,6 +77,19 @@ In detail, the workflow of `tiller auth` is as follows:
 **Important**: `tiller auth` is the ONLY operation that initiates this interactive workflow. All
 other operations should be scriptable.
 
+`tiller auth` additionally refuses to start unless stdin is a terminal. The flow opens a browser and
+then blocks until a person authorizes in it, so started from a script, a background process, or an
+AI agent's shell it pops a browser window at the user without warning and then hangs. That is what
+re-authorization "happening on its own" looks like from the user's side. There is no legitimate
+non-interactive use of the flow, since it cannot complete without a human; `tiller auth --verify` is
+the scriptable command.
+
+Credentials are read only when an operation actually needs the Google API, in `api::sheet()`.
+Starting the CLI or the MCP server does not touch them, so neither a `tiller mcp` launch nor an MCP
+client's `initialize` handshake can trigger anything auth-related. When the stored credentials do
+not work, the error says that a person has to run `tiller auth` in a terminal and that an assistant
+should ask rather than run it.
+
 #### `tiller auth --verify`
 
 To check authentication, and refresh the token, users can call `tiller auth --verify`. The
