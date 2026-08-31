@@ -22,8 +22,8 @@ pub type Transactions = Items<Transaction>;
 #[serde(rename_all = "snake_case")]
 pub struct Transaction {
     /// The synthetic identifier that this tool assigns and owns. It is the primary key of the
-    /// `transactions` table and lives in the Google Sheet in the `Tiller Sync ID (do not edit)`
-    /// column. Do not edit it in the sheet.
+    /// `transactions` table and lives in the Google Sheet in the `TillerSyncID` column. Do not
+    /// edit it in the sheet.
     pub(crate) sync_id: String,
 
     /// A unique ID assigned to the transaction by Tiller's systems. Critical for support
@@ -549,10 +549,12 @@ pub struct TransactionUpdates {
     pub other_fields: Vec<(String, String)>,
 }
 
-/// The header of the column that this tool owns in the Transactions tab. It is deliberately
-/// wordy: the name has to be one that no existing sheet is likely to have used already, and it
-/// has to tell anyone looking at the sheet to leave the column alone.
-pub(crate) const SYNC_ID_STR: &str = "Tiller Sync ID (do not edit)";
+/// The header of the column that this tool owns in the Transactions tab.
+///
+/// Tiller's own headers, and the ones users add, are ordinary words separated by spaces. Running
+/// the name together as one token keeps it out of the way of anything an existing sheet is likely
+/// to have called a column already.
+pub(crate) const SYNC_ID_STR: &str = "TillerSyncID";
 pub(super) const TRANSACTION_ID_STR: &str = "Transaction ID";
 pub(super) const DATE_STR: &str = "Date";
 pub(super) const DESCRIPTION_STR: &str = "Description";

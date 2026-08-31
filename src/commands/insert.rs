@@ -12,8 +12,8 @@ use crate::{Config, Result};
 ///
 /// A sync ID is minted for the new row and returned on success. It is the identifier the row is
 /// known by everywhere else: `tiller update transactions --ids`, `tiller delete transactions
-/// --ids`, and the `Tiller Sync ID (do not edit)` column of the Google Sheet. Tiller's own
-/// `Transaction ID` is left blank, because a locally-added row has never had one.
+/// --ids`, and the `TillerSyncID` column of the Google Sheet. Tiller's own `Transaction ID` is
+/// left blank, because a locally-added row has never had one.
 ///
 /// # Arguments
 ///

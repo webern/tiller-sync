@@ -370,8 +370,8 @@ pub enum UpdateSubcommand {
 #[command(allow_negative_numbers = true)]
 pub struct UpdateTransactionsArgs {
     /// One or more sync IDs to update. All specified transactions will receive the same updates.
-    /// A sync ID is the value in the `Tiller Sync ID (do not edit)` column, not Tiller's own
-    /// `Transaction ID`; to find a row by the latter, query for it.
+    /// A sync ID is the value in the `TillerSyncID` column, not Tiller's own `Transaction ID`; to
+    /// find a row by the latter, query for it.
     #[arg(long, num_args = 1..)]
     ids: Vec<String>,
 
@@ -565,9 +565,8 @@ pub enum DeleteSubcommand {
 /// yet, you can restore the transactions by running `sync down` to re-download from the sheet.
 #[derive(Debug, Parser, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DeleteTransactionsArgs {
-    /// One or more sync IDs to delete. A sync ID is the value in the `Tiller Sync ID (do not
-    /// edit)` column, not Tiller's own `Transaction ID`; to find a row by the latter, query for
-    /// it.
+    /// One or more sync IDs to delete. A sync ID is the value in the `TillerSyncID` column, not
+    /// Tiller's own `Transaction ID`; to find a row by the latter, query for it.
     #[arg(long = "id", required = true)]
     ids: Vec<String>,
 }

@@ -298,7 +298,7 @@ fn check_unique(existing: &[&str]) -> Res<()> {
 /// The columns compared before writing, to confirm the sheet has not moved underneath us.
 ///
 /// `Date` and `Transaction ID` are the two columns most likely to distinguish one row from the
-/// row above it, and `Tiller Sync ID` is the column being written. Comparing all three catches a
+/// row above it, and `TillerSyncID` is the column being written. Comparing all three catches a
 /// row inserted, deleted or reordered in the seconds between the read and the write, which would
 /// otherwise put every identifier on the wrong row.
 const WITNESS_COLUMNS: &[&str] = &[SYNC_ID_STR, TRANSACTION_ID_STR, DATE_STR];

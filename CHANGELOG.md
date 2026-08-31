@@ -26,9 +26,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- A `Tiller Sync ID (do not edit)` column in the Transactions tab, holding the identifier each row
-  is known by. `sync down` fills it in for any row that lacks one, and does not write to the sheet
-  at all once every row is identified. A sheet whose `Transaction ID` values were already unique
+- A `TillerSyncID` column in the Transactions tab, holding the identifier each row is known by.
+  `sync down` fills it in for any row that lacks one, and does not write to the sheet at all once
+  every row is identified. A sheet whose `Transaction ID` values were already unique
   keeps the identity it had: each row's identifier is seeded from the value it already carried, so
   no row is re-keyed by the upgrade. [#37]
 - `sync down` reports, rather than adopts, a column that was already in the sheet under that

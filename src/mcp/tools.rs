@@ -171,9 +171,8 @@ impl TillerServer {
     /// # Parameters
     ///
     /// - `ids`: One or more sync IDs to update. A sync ID is the primary key of a transaction and
-    ///   the value in the sheet's `Tiller Sync ID (do not edit)` column; it is not Tiller's own
-    ///   `Transaction ID`, which is not unique. All specified transactions will receive the
-    ///   same field updates.
+    ///   the value in the sheet's `TillerSyncID` column; it is not Tiller's own `Transaction ID`,
+    ///   which is not unique. All specified transactions will receive the same field updates.
     /// - `updates`: The fields to update. Only fields with values will be modified; unspecified
     ///   fields remain unchanged. See `TransactionUpdates` for available fields.
     ///
@@ -349,8 +348,8 @@ impl TillerServer {
     /// # Parameters
     ///
     /// - `ids`: One or more sync IDs to delete. A sync ID is the primary key of a transaction and
-    ///   the value in the sheet's `Tiller Sync ID (do not edit)` column; it is not Tiller's own
-    ///   `Transaction ID`, which is not unique. All specified transactions will be removed.
+    ///   the value in the sheet's `TillerSyncID` column; it is not Tiller's own `Transaction ID`,
+    ///   which is not unique. All specified transactions will be removed.
     ///
     /// # Returns
     ///

@@ -54,9 +54,9 @@ Downloads data from the Google Sheet to the local SQLite database.
 
 **Behavior:**
 
-- Any Transactions row without a sync ID is given one, and the sheet's `Tiller Sync ID (do not
-  edit)` column is stamped with it. This is the only write `sync_down` makes, and it makes none at
-  all once every row is identified.
+- Any Transactions row without a sync ID is given one, and the sheet's `TillerSyncID` column is
+  stamped with it. This is the only write `sync_down` makes, and it makes none at all once every
+  row is identified.
 - Transactions are upserted (insert/update/delete based on sync ID)
 - Categories and AutoCat are fully replaced
 - Cell formulas are captured and stored for optional preservation during `sync_up`
