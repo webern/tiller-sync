@@ -54,7 +54,10 @@ Downloads data from the Google Sheet to the local SQLite database.
 
 **Behavior:**
 
-- Transactions are upserted (insert/update/delete based on Transaction ID)
+- Any Transactions row without a sync ID is given one, and the sheet's `TillerSyncID` column is
+  stamped with it. This is the only write `sync_down` makes, and it makes none at all once every
+  row is identified.
+- Transactions are upserted (insert/update/delete based on sync ID)
 - Categories and AutoCat are fully replaced
 - Cell formulas are captured and stored for optional preservation during `sync_up`
 - Each row's `original_order` is recorded for formula position tracking
@@ -220,7 +223,7 @@ Retrieves database schema information to help understand the data structure.
 
 | Table          | Description                         | Primary Key       |
 |----------------|-------------------------------------|-------------------|
-| `transactions` | Financial transactions              | `transaction_id`  |
+| `transactions` | Financial transactions              | `sync_id`         |
 | `categories`   | Budget categories                   | `category`        |
 | `autocat`      | Automatic categorization rules      | `id` (auto-incr)  |
 
@@ -245,7 +248,8 @@ Retrieves database schema information to help understand the data structure.
 
 | Column           | Type    | Description                                          |
 |------------------|---------|------------------------------------------------------|
-| `transaction_id` | TEXT    | Unique ID (Tiller-assigned or `user-` prefixed)      |
+| `sync_id`        | TEXT    | Primary key. This tool's own identifier, `sync-` prefixed |
+| `transaction_id` | TEXT    | Tiller's own ID. Not unique, and may be blank        |
 | `date`           | TEXT    | Transaction date (YYYY-MM-DD)                        |
 | `description`    | TEXT    | Cleaned merchant description                         |
 | `amount`         | TEXT    | Transaction amount (negative = expense)              |

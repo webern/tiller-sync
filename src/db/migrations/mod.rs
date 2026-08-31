@@ -8,9 +8,10 @@
 //! If any part fails, the entire migration is rolled back.
 
 use crate::error::Res;
-use crate::model::{Date, DateFromOpt};
+use crate::model::{mint_unique_sync_id, seed_from_transaction_id, Date, DateFromOpt};
 use anyhow::{bail, Context};
 use sqlx::{Executor, Row, Sqlite, SqlitePool, Transaction};
+use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
 use tracing::{debug, info};
@@ -53,6 +54,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 2,
         up: MigrationAction::Rust(migration_02_up),
         down: MigrationAction::Rust(migration_02_down),
+    },
+    Migration {
+        version: 3,
+        up: MigrationAction::Rust(migration_03_up),
+        down: MigrationAction::Rust(migration_03_down),
     },
 ];
 
@@ -255,6 +261,159 @@ fn convert_iso_to_us_datetime(s: &str) -> Res<String> {
     Ok(format!(
         "{month}/{day}/{year} {hour12}:{minute}:{second} {ampm}"
     ))
+}
+
+// ============================================================================
+// Migration 03: Re-key transactions on the synthetic sync ID
+// ============================================================================
+
+/// Migration 03 UP: Give every transaction a `sync_id` and key the table on it.
+///
+/// Tiller's `Transaction ID` cannot be a primary key, so the column is demoted to ordinary data.
+/// Each existing row's sync ID is derived from the `transaction_id` it already has, which the
+/// previous schema required to be unique and non-blank. Deriving rather than minting is what makes
+/// the upgrade seamless: the sheet's own bootstrap seeds itself from the same column by the same
+/// rule, so the two agree and no row looks deleted and re-added. A value that cannot be used
+/// (an unexpected character, say) is minted instead.
+fn migration_03_up(
+    pool: &SqlitePool,
+    new_version: i32,
+) -> Pin<Box<dyn Future<Output = Res<()>> + Send + '_>> {
+    Box::pin(async move {
+        let mut tx = pool
+            .begin()
+            .await
+            .context("Failed to begin transaction for migration 03 up")?;
+
+        // The rebuild drops and recreates `transactions`, whose `category` column is a foreign key.
+        // Deferring the check to commit keeps the intermediate states from tripping it.
+        sqlx::query("PRAGMA defer_foreign_keys = ON")
+            .execute(&mut *tx)
+            .await?;
+
+        sqlx::query("ALTER TABLE transactions ADD COLUMN sync_id TEXT")
+            .execute(&mut *tx)
+            .await
+            .context("Failed to add sync_id column")?;
+
+        let rows = sqlx::query("SELECT transaction_id FROM transactions")
+            .fetch_all(&mut *tx)
+            .await
+            .context("Failed to fetch transactions for migration 03")?;
+
+        let mut taken: HashSet<String> = HashSet::new();
+        let mut seeded = 0;
+        let mut minted = 0;
+
+        for row in &rows {
+            let transaction_id: String = row.try_get("transaction_id")?;
+            let sync_id = match seed_from_transaction_id(&transaction_id) {
+                Some(seed) if !taken.contains(&seed) => {
+                    seeded += 1;
+                    seed
+                }
+                _ => {
+                    minted += 1;
+                    mint_unique_sync_id(&taken)
+                }
+            };
+            taken.insert(sync_id.clone());
+
+            sqlx::query("UPDATE transactions SET sync_id = ? WHERE transaction_id = ?")
+                .bind(&sync_id)
+                .bind(&transaction_id)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| {
+                    format!("Failed to set sync_id for transaction {transaction_id}")
+                })?;
+        }
+
+        tx.execute(include_str!("migration_03_up.sql"))
+            .await
+            .context("Failed to rebuild the transactions table")?;
+
+        update_schema_version(&mut tx, new_version).await?;
+
+        tx.commit()
+            .await
+            .context("Failed to commit migration 03 up")?;
+
+        info!(
+            "Migration 03 up: keyed {} transactions on sync_id ({seeded} derived from an existing \
+             Transaction ID, {minted} newly minted)",
+            rows.len()
+        );
+        Ok(())
+    })
+}
+
+/// Migration 03 DOWN: Key the transactions table on Tiller's `Transaction ID` again.
+///
+/// The older schema cannot hold a blank or repeated `Transaction ID`, and most real Tiller sheets
+/// have both. Rather than dropping those rows, the downgrade puts the row's sync ID in the
+/// `transaction_id` column so that every row survives with a usable key. Run `tiller sync down`
+/// afterwards.
+fn migration_03_down(
+    pool: &SqlitePool,
+    new_version: i32,
+) -> Pin<Box<dyn Future<Output = Res<()>> + Send + '_>> {
+    Box::pin(async move {
+        let mut tx = pool
+            .begin()
+            .await
+            .context("Failed to begin transaction for migration 03 down")?;
+
+        // The rebuild drops and recreates `transactions`, whose `category` column is a foreign key.
+        // Deferring the check to commit keeps the intermediate states from tripping it.
+        sqlx::query("PRAGMA defer_foreign_keys = ON")
+            .execute(&mut *tx)
+            .await?;
+
+        let rows = sqlx::query("SELECT sync_id, transaction_id FROM transactions")
+            .fetch_all(&mut *tx)
+            .await
+            .context("Failed to fetch transactions for migration 03 down")?;
+
+        let mut taken: HashSet<String> = HashSet::new();
+        let mut substituted = 0;
+
+        for row in &rows {
+            let sync_id: String = row.try_get("sync_id")?;
+            let transaction_id: String = row.try_get("transaction_id")?;
+
+            if !transaction_id.trim().is_empty() && taken.insert(transaction_id.clone()) {
+                continue;
+            }
+
+            substituted += 1;
+            taken.insert(sync_id.clone());
+            sqlx::query("UPDATE transactions SET transaction_id = ? WHERE sync_id = ?")
+                .bind(&sync_id)
+                .bind(&sync_id)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("Failed to set transaction_id for row {sync_id}"))?;
+        }
+
+        tx.execute(include_str!("migration_03_down.sql"))
+            .await
+            .context("Failed to rebuild the transactions table")?;
+
+        update_schema_version(&mut tx, new_version).await?;
+
+        tx.commit()
+            .await
+            .context("Failed to commit migration 03 down")?;
+
+        info!(
+            "Migration 03 down: keyed {} transactions on transaction_id ({substituted} rows had a \
+             blank or repeated Transaction ID and now carry their sync ID there instead). Run \
+             'tiller sync down'.",
+            rows.len()
+        );
+        Ok(())
+    })
 }
 
 // ============================================================================
@@ -490,18 +649,19 @@ mod tests {
 
     #[test]
     fn testvalidate_migrations_succeeds_for_valid_range() {
-        // Migrations 1 and 2 exist, so this should succeed
-        assert!(validate_migrations(0, 1).is_ok());
-        assert!(validate_migrations(1, 0).is_ok());
-        assert!(validate_migrations(0, 2).is_ok());
-        assert!(validate_migrations(2, 0).is_ok());
+        // Every migration up to CURRENT_VERSION exists, in both directions.
+        for version in 1..=crate::db::CURRENT_VERSION {
+            assert!(validate_migrations(0, version).is_ok());
+            assert!(validate_migrations(version, 0).is_ok());
+        }
     }
 
     #[test]
     fn testvalidate_migrations_fails_for_missing_migration() {
-        // Migration 3 doesn't exist
-        assert!(validate_migrations(0, 3).is_err());
-        assert!(validate_migrations(2, 4).is_err());
+        // Nothing exists past CURRENT_VERSION.
+        let past_the_end = crate::db::CURRENT_VERSION + 1;
+        assert!(validate_migrations(0, past_the_end).is_err());
+        assert!(validate_migrations(past_the_end, 0).is_err());
     }
 
     #[tokio::test]

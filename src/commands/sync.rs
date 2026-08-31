@@ -1,5 +1,5 @@
 use super::{FormulasMode, Out};
-use crate::api::{sheet, tiller, Mode, Tiller};
+use crate::api::{sheet, tiller, Mode, SyncIds, Tiller};
 use crate::backup::{SYNC_DOWN, SYNC_UP_PRE};
 use crate::error::{ErrorType, IntoResult};
 use crate::{Config, Result};
@@ -17,10 +17,24 @@ pub async fn sync_down(config: Config, mode: Mode) -> Result<Out<()>> {
         .pub_result(ErrorType::Internal)?;
     debug!("Saved SQLite backup to {}", sqlite_backup.display());
 
-    // Download data from Google Sheets (or test data in test mode)
+    // The sync IDs already in use locally, so that an identifier minted for a new sheet row
+    // cannot collide with one this datastore already holds.
+    let known_sync_ids = config
+        .db()
+        .sync_ids()
+        .await
+        .pub_result(ErrorType::Database)?;
+
+    // Download data from Google Sheets (or test data in test mode). The sync ID assignment phase
+    // runs as part of this fetch: any row of the Transactions tab that lacks an identifier is
+    // given one and the sheet is stamped before the data comes back. The write is verified before
+    // anything below commits to SQLite, so a failure here leaves nothing half-done locally.
     let sheet_client = sheet(config.clone(), mode).await?;
     let mut tiller_client = tiller(sheet_client).await.pub_result(ErrorType::Internal)?;
-    let tiller_data = tiller_client.get_data().await.pub_result(ErrorType::Sync)?;
+    let tiller_data = tiller_client
+        .get_data(SyncIds::Assign(&known_sync_ids))
+        .await
+        .pub_result(ErrorType::Sync)?;
 
     // Save JSON backup of downloaded data
     let json_backup = config
@@ -70,7 +84,10 @@ pub async fn sync_up(
     // Download current sheet state (or test data in test mode)
     let sheet_client = sheet(config.clone(), mode).await?;
     let mut tiller_client = tiller(sheet_client).await.pub_result(ErrorType::Internal)?;
-    let current_sheet = tiller_client.get_data().await.pub_result(ErrorType::Sync)?;
+    let current_sheet = tiller_client
+        .get_data(SyncIds::Read)
+        .await
+        .pub_result(ErrorType::Sync)?;
 
     // Save sync-up-pre backup (before any modifications)
     let pre_backup = config
@@ -216,8 +233,11 @@ pub async fn sync_up(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::{SheetCall, TestSheet, MODE_ENV, TRANSACTIONS};
+    use crate::api::{
+        SheetCall, TestSheet, TestSheetState, AUTO_CAT, CATEGORIES, MODE_ENV, TRANSACTIONS,
+    };
     use crate::args::DeleteTransactionsArgs;
+    use crate::model::Transaction;
     use crate::test::TestEnv;
 
     #[tokio::test]
@@ -477,7 +497,7 @@ mod tests {
         let db = config.db();
         let data = db.get_tiller_data().await.unwrap();
         let txn_to_delete = &data.transactions.data()[1]; // Get second transaction
-        let delete_args = DeleteTransactionsArgs::new(vec![&txn_to_delete.transaction_id]).unwrap();
+        let delete_args = DeleteTransactionsArgs::new(vec![&txn_to_delete.sync_id]).unwrap();
         db.delete_transactions(delete_args).await.unwrap();
 
         // Run sync_up with --formulas preserve (no --force)
@@ -508,7 +528,7 @@ mod tests {
         let db = config.db();
         let data = db.get_tiller_data().await.unwrap();
         let txn_to_delete = &data.transactions.data()[1];
-        let delete_args = DeleteTransactionsArgs::new(vec![&txn_to_delete.transaction_id]).unwrap();
+        let delete_args = DeleteTransactionsArgs::new(vec![&txn_to_delete.sync_id]).unwrap();
         db.delete_transactions(delete_args).await.unwrap();
 
         // Run sync_up with --formulas preserve AND --force
@@ -534,7 +554,7 @@ mod tests {
         let db = config.db();
         let data = db.get_tiller_data().await.unwrap();
         let txn_to_delete = &data.transactions.data()[1];
-        let delete_args = DeleteTransactionsArgs::new(vec![&txn_to_delete.transaction_id]).unwrap();
+        let delete_args = DeleteTransactionsArgs::new(vec![&txn_to_delete.sync_id]).unwrap();
         db.delete_transactions(delete_args).await.unwrap();
 
         // Run sync_up with --formulas ignore (no --force needed)
@@ -817,7 +837,7 @@ mod tests {
         let mut client = tiller(sheet(config.clone(), Mode::Testing).await.unwrap())
             .await
             .unwrap();
-        let from_sheet = client.get_data().await.unwrap();
+        let from_sheet = client.get_data(SyncIds::Read).await.unwrap();
         assert_eq!(
             from_sheet.transactions.formulas(),
             &expected_formulas,
@@ -903,7 +923,7 @@ mod tests {
         let data = db.get_tiller_data().await.unwrap();
         let total_formulas = data.transactions.formulas().len();
         let last = data.transactions.data().last().unwrap();
-        let delete_args = DeleteTransactionsArgs::new(vec![&last.transaction_id]).unwrap();
+        let delete_args = DeleteTransactionsArgs::new(vec![&last.sync_id]).unwrap();
         db.delete_transactions(delete_args).await.unwrap();
 
         // --force because deleting a row leaves a gap in original_order.
@@ -979,5 +999,461 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The headers a Transactions tab had before this tool owned a column in it.
+    const PRE_MIGRATION_HEADERS: &[&str] = &[
+        "Date",
+        "Description",
+        "Amount",
+        "Account",
+        "Account #",
+        "Institution",
+        "Account ID",
+        "Transaction ID",
+        "Category",
+    ];
+
+    /// Builds a Transactions tab as the previous release saw it: no sync ID column at all.
+    ///
+    /// The three `tid-` rows are the ones the datastore was last synced with. The three above them
+    /// are new, in the position Tiller puts new rows: at the top. One has no `Transaction ID` at
+    /// all, which is what feeds like Apple Card produce, and two carry the same `split:[1]` marker.
+    /// Neither can be told apart by that column, which is the whole reason for the sync ID.
+    fn pre_migration_sheet() -> TestSheetState {
+        let transactions = vec![
+            PRE_MIGRATION_HEADERS.to_vec(),
+            vec![
+                "2025-03-01",
+                "New Blank ID",
+                "-11.00",
+                "Checking",
+                "1234",
+                "Test Bank",
+                "acct-001",
+                "",
+                "Food",
+            ],
+            vec![
+                "2025-03-02",
+                "New Split A",
+                "-12.00",
+                "Checking",
+                "1234",
+                "Test Bank",
+                "acct-001",
+                "split:[1]",
+                "Food",
+            ],
+            vec![
+                "2025-03-03",
+                "New Split B",
+                "-13.00",
+                "Checking",
+                "1234",
+                "Test Bank",
+                "acct-001",
+                "split:[1]",
+                "Food",
+            ],
+            vec![
+                "2025-01-15",
+                "Coffee Shop",
+                "-4.50",
+                "Checking",
+                "1234",
+                "Test Bank",
+                "acct-001",
+                "tid-aaa",
+                "Food",
+            ],
+            vec![
+                "2025-01-16",
+                "Bookstore",
+                "-20.00",
+                "Checking",
+                "1234",
+                "Test Bank",
+                "acct-001",
+                "tid-bbb",
+                "Food",
+            ],
+            vec![
+                "2025-01-17",
+                "Groceries",
+                "-64.00",
+                "Checking",
+                "1234",
+                "Test Bank",
+                "acct-001",
+                "tid-ccc",
+                "Food",
+            ],
+        ];
+
+        let categories = vec![
+            vec!["Category", "Group", "Type", "Hide From Reports"],
+            vec!["Food", "Living", "Expense", ""],
+        ];
+
+        let auto_cat = vec![vec!["Category", "Description Contains"]];
+
+        let mut data = std::collections::HashMap::new();
+        data.insert(TRANSACTIONS.to_string(), to_grid(transactions));
+        data.insert(CATEGORIES.to_string(), to_grid(categories));
+        data.insert(AUTO_CAT.to_string(), to_grid(auto_cat));
+
+        TestSheetState {
+            data,
+            formulas: std::collections::HashMap::new(),
+            call_history: std::cell::RefCell::new(vec![]),
+        }
+    }
+
+    fn to_grid(rows: Vec<Vec<&str>>) -> Vec<Vec<String>> {
+        rows.into_iter()
+            .map(|row| row.into_iter().map(|s| s.to_string()).collect())
+            .collect()
+    }
+
+    /// Replaces the datastore with one built the way the previous release built it: schema version
+    /// 2, `transactions` keyed on Tiller's `Transaction ID`, and no sync ID anywhere.
+    async fn write_pre_migration_datastore(sqlite_path: &std::path::Path) {
+        std::fs::remove_file(sqlite_path).unwrap();
+        let pool = crate::db::Db::create_at_version(sqlite_path, 2)
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "INSERT INTO categories (category, category_group, type, hide_from_reports, \
+             original_order) VALUES ('Food', 'Living', 'Expense', '', 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let rows = [
+            ("tid-aaa", "2025-01-15", "Coffee Shop", -4.50, 0),
+            ("tid-bbb", "2025-01-16", "Bookstore", -20.00, 1),
+            ("tid-ccc", "2025-01-17", "Groceries", -64.00, 2),
+        ];
+        for (id, date, description, amount, order) in rows {
+            sqlx::query(
+                "INSERT INTO transactions (transaction_id, date, description, amount, account, \
+                 account_number, institution, account_id, category, original_order) \
+                 VALUES (?, ?, ?, ?, 'Checking', '1234', 'Test Bank', 'acct-001', 'Food', ?)",
+            )
+            .bind(id)
+            .bind(date)
+            .bind(description)
+            .bind(amount)
+            .bind(order)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        // A real pre-migration datastore has the header mapping its last `sync down` recorded.
+        let metadata: [(&str, &[&str]); 3] = [
+            (TRANSACTIONS, PRE_MIGRATION_HEADERS),
+            (
+                CATEGORIES,
+                &["Category", "Group", "Type", "Hide From Reports"],
+            ),
+            (AUTO_CAT, &["Category", "Description Contains"]),
+        ];
+        for (sheet, headers) in metadata {
+            for (order, header) in headers.iter().enumerate() {
+                sqlx::query(
+                    "INSERT INTO sheet_metadata (sheet, column_name, header_name, \"order\") \
+                     VALUES (?, ?, ?, ?)",
+                )
+                .bind(sheet)
+                .bind(
+                    header
+                        .to_lowercase()
+                        .replace(' ', "_")
+                        .replace('#', "number"),
+                )
+                .bind(*header)
+                .bind(order as i64)
+                .execute(&pool)
+                .await
+                .unwrap();
+            }
+        }
+
+        pool.close().await;
+    }
+
+    /// Reads the sync ID column out of the test sheet, keyed by the row's `Transaction ID`.
+    fn sheet_sync_ids(env: &TestEnv) -> std::collections::BTreeMap<String, String> {
+        let state = env.get_state();
+        let grid = state.data.get(TRANSACTIONS).unwrap();
+        let header = &grid[0];
+        let sync_col = header
+            .iter()
+            .position(|h| h == crate::model::SYNC_ID_STR)
+            .expect("the sheet should have gained the sync ID column");
+        let id_col = header.iter().position(|h| h == "Transaction ID").unwrap();
+
+        grid[1..]
+            .iter()
+            .map(|row| {
+                let transaction_id = row.get(id_col).cloned().unwrap_or_default();
+                let sync_id = row.get(sync_col).cloned().unwrap_or_default();
+                (format!("{transaction_id}|{}", row[1]), sync_id)
+            })
+            .collect()
+    }
+
+    /// A datastore and sheet from before sync IDs existed must come through the upgrade intact,
+    /// including the rows Tiller added to the sheet in the meantime.
+    ///
+    /// This is the case that matters most: a sheet that worked under the previous release, whose
+    /// `Transaction ID` values were all unique, has to keep the identity it already had. If the
+    /// migration and the sheet bootstrap disagreed about what a row's identifier is, every
+    /// existing row would be deleted and re-inserted on the first `sync down`, taking whatever the
+    /// user had categorized or annotated with it.
+    #[tokio::test]
+    async fn test_upgrade_from_a_pre_migration_datastore() {
+        let env = TestEnv::new().await;
+        let sqlite_path = env.config().sqlite_path().to_path_buf();
+        let root = sqlite_path.parent().unwrap().to_path_buf();
+
+        // The sheet as the previous release left it, with three rows Tiller has added since.
+        env.set_state(pre_migration_sheet());
+
+        // The datastore as the previous release left it, keyed on `Transaction ID`.
+        write_pre_migration_datastore(&sqlite_path).await;
+
+        // Loading the datastore runs the migration.
+        let config = Config::load(&root).await.unwrap();
+        let migrated: std::collections::BTreeSet<String> = config
+            .db()
+            .get_tiller_data()
+            .await
+            .unwrap()
+            .transactions
+            .data()
+            .iter()
+            .map(|t| t.sync_id.clone())
+            .collect();
+        assert_eq!(
+            migrated,
+            ["sync-tid-aaa", "sync-tid-bbb", "sync-tid-ccc"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<std::collections::BTreeSet<String>>(),
+            "the migration should derive each sync ID from the transaction ID the row already had"
+        );
+
+        // The first sync down after the upgrade: it creates the column and seeds it.
+        sync_down(config.clone(), Mode::Testing).await.unwrap();
+
+        let data = config.db().get_tiller_data().await.unwrap();
+        let transactions = data.transactions.data();
+        assert_eq!(
+            transactions.len(),
+            6,
+            "three rows carried over and three new ones, with nothing lost or duplicated"
+        );
+
+        // The rows the datastore already held kept the identifiers the migration gave them, which
+        // is what proves they were updated rather than deleted and re-inserted.
+        let after: std::collections::BTreeSet<String> =
+            transactions.iter().map(|t| t.sync_id.clone()).collect();
+        for id in &migrated {
+            assert!(
+                after.contains(id),
+                "{id} should have survived the first sync down, but the datastore now holds {after:?}"
+            );
+        }
+
+        // The three rows Tiller added were minted, because neither a blank nor a repeated
+        // `Transaction ID` can seed anything.
+        let minted: Vec<&Transaction> = transactions
+            .iter()
+            .filter(|t| !migrated.contains(&t.sync_id))
+            .collect();
+        assert_eq!(minted.len(), 3);
+        for transaction in &minted {
+            assert!(
+                transaction.sync_id.starts_with("sync-"),
+                "a minted sync ID should carry the prefix, got '{}'",
+                transaction.sync_id
+            );
+            assert_ne!(transaction.sync_id, "sync-");
+            assert_ne!(
+                transaction.sync_id, "sync-split:[1]",
+                "a repeated Transaction ID must not seed an identifier"
+            );
+        }
+
+        // Tiller's own values are kept verbatim, repeats and blanks included.
+        let mut transaction_ids: Vec<&str> = transactions
+            .iter()
+            .map(|t| t.transaction_id.as_str())
+            .collect();
+        transaction_ids.sort();
+        assert_eq!(
+            transaction_ids,
+            vec![
+                "",
+                "split:[1]",
+                "split:[1]",
+                "tid-aaa",
+                "tid-bbb",
+                "tid-ccc"
+            ]
+        );
+
+        // `original_order` follows the sheet, so the carried-over rows have moved down by three.
+        let coffee = transactions
+            .iter()
+            .find(|t| t.sync_id == "sync-tid-aaa")
+            .unwrap();
+        assert_eq!(coffee.original_order, Some(3));
+        assert_eq!(coffee.description, "Coffee Shop");
+
+        // The sheet was stamped, and every identifier in it matches the datastore.
+        let stamped = sheet_sync_ids(&env);
+        assert_eq!(stamped.len(), 6);
+        assert_eq!(stamped.get("tid-aaa|Coffee Shop").unwrap(), "sync-tid-aaa");
+        for (row, sync_id) in &stamped {
+            assert!(
+                after.contains(sync_id),
+                "the sheet holds '{sync_id}' on {row}, which the datastore does not have"
+            );
+        }
+
+        // And the upgrade settles: a second sync down finds every row already identified, writes
+        // nothing, and changes no identifier.
+        let sheet = TestSheet::new(config.spreadsheet_id());
+        sheet.clear_history();
+        sync_down(config.clone(), Mode::Testing).await.unwrap();
+
+        assert!(
+            !sheet
+                .call_history()
+                .iter()
+                .any(|call| matches!(call, SheetCall::WriteRanges { .. })),
+            "a sync down of an already-identified sheet must not write to it"
+        );
+        assert_eq!(sheet_sync_ids(&env), stamped);
+        let settled: std::collections::BTreeSet<String> = config
+            .db()
+            .get_tiller_data()
+            .await
+            .unwrap()
+            .transactions
+            .data()
+            .iter()
+            .map(|t| t.sync_id.clone())
+            .collect();
+        assert_eq!(settled, after);
+    }
+
+    /// A column that was already in the user's sheet under our header has to be reported, not
+    /// adopted: adopting it would key rows on the user's data and then overwrite that data on the
+    /// next `sync up`.
+    #[tokio::test]
+    async fn test_sync_down_rejects_a_pre_existing_sync_id_column() {
+        let env = TestEnv::new().await;
+        let config = env.config();
+
+        let mut state = pre_migration_sheet();
+        let grid = state.data.get_mut(TRANSACTIONS).unwrap();
+        grid[0].push(crate::model::SYNC_ID_STR.to_string());
+        for (ix, row) in grid[1..].iter_mut().enumerate() {
+            row.push(format!("my own note {ix}"));
+        }
+        env.set_state(state);
+
+        let err = sync_down(config, Mode::Testing)
+            .await
+            .expect_err("a column full of the user's data must not be adopted")
+            .to_string();
+
+        assert!(err.contains("did not write"), "{err}");
+        assert!(err.contains("rename it"), "{err}");
+    }
+
+    /// A copy-pasted row leaves two sheet rows sharing one identifier, which `sync down` has to
+    /// report rather than guess at.
+    #[tokio::test]
+    async fn test_sync_down_rejects_duplicate_sync_ids() {
+        let env = TestEnv::new().await;
+        let config = env.config();
+
+        // A first sync down stamps the sheet.
+        sync_down(config.clone(), Mode::Testing).await.unwrap();
+
+        // Copy row 2's identifier onto row 3, as copying a row in the sheet would.
+        let mut state = env.get_state();
+        let grid = state.data.get_mut(TRANSACTIONS).unwrap();
+        let sync_col = grid[0]
+            .iter()
+            .position(|h| h == crate::model::SYNC_ID_STR)
+            .unwrap();
+        let copied = grid[1][sync_col].clone();
+        grid[2][sync_col] = copied.clone();
+        env.set_state(state);
+
+        let err = sync_down(config, Mode::Testing)
+            .await
+            .expect_err("two rows cannot share one identifier")
+            .to_string();
+
+        assert!(err.contains("repeats a value"), "{err}");
+        assert!(err.contains(&copied), "{err}");
+        assert!(err.contains("rows 2, 3"), "{err}");
+    }
+
+    /// The sync ID column travels back to the sheet on `sync up` like any other column.
+    #[tokio::test]
+    async fn test_sync_up_writes_the_sync_id_column_back() {
+        let env = TestEnv::new().await;
+        let config = env.config();
+
+        sync_down(config.clone(), Mode::Testing).await.unwrap();
+        let stamped = sheet_sync_id_column(&env);
+        assert!(!stamped.is_empty());
+
+        sync_up(config.clone(), Mode::Testing, false, FormulasMode::Preserve)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            sheet_sync_id_column(&env),
+            stamped,
+            "sync up must write every identifier back, unchanged"
+        );
+
+        // And the next sync down finds them all and writes nothing.
+        let sheet = TestSheet::new(config.spreadsheet_id());
+        sheet.clear_history();
+        sync_down(config, Mode::Testing).await.unwrap();
+        assert!(
+            !sheet
+                .call_history()
+                .iter()
+                .any(|call| matches!(call, SheetCall::WriteRanges { .. })),
+            "every row is already identified, so nothing should be written"
+        );
+    }
+
+    /// The sync ID column of the test sheet, in row order.
+    fn sheet_sync_id_column(env: &TestEnv) -> Vec<String> {
+        let state = env.get_state();
+        let grid = state.data.get(TRANSACTIONS).unwrap();
+        let col = grid[0]
+            .iter()
+            .position(|h| h == crate::model::SYNC_ID_STR)
+            .expect("the sheet should have the sync ID column");
+        grid[1..]
+            .iter()
+            .map(|row| row.get(col).cloned().unwrap_or_default())
+            .collect()
     }
 }

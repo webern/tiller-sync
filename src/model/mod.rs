@@ -6,6 +6,7 @@ mod date;
 mod items;
 mod mapping;
 mod row_col;
+mod sync_id;
 mod transaction;
 
 pub use amount::{Amount, AmountFormat};
@@ -17,6 +18,10 @@ pub(crate) use items::Item;
 pub(crate) use mapping::Mapping;
 pub(crate) use row_col::RowCol;
 use serde::{Deserialize, Serialize};
+pub(crate) use sync_id::{
+    assign_sync_ids, check_sync_ids_unmoved, check_sync_ids_written, mint_sync_id,
+    mint_unique_sync_id, seed_from_transaction_id, SyncIdAssignment, SYNC_ID_STR,
+};
 pub use transaction::{Transaction, TransactionColumn, TransactionUpdates, Transactions};
 
 /// Represents all the sheets of interest from a tiller Google sheet.

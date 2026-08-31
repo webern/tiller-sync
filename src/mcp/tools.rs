@@ -170,8 +170,9 @@ impl TillerServer {
     ///
     /// # Parameters
     ///
-    /// - `ids`: One or more transaction IDs to update. All specified transactions will receive the
-    ///   same field updates.
+    /// - `ids`: One or more sync IDs to update. A sync ID is the primary key of a transaction and
+    ///   the value in the sheet's `TillerSyncID` column; it is not Tiller's own `Transaction ID`,
+    ///   which is not unique. All specified transactions will receive the same field updates.
     /// - `updates`: The fields to update. Only fields with values will be modified; unspecified
     ///   fields remain unchanged. See `TransactionUpdates` for available fields.
     ///
@@ -346,16 +347,18 @@ impl TillerServer {
     ///
     /// # Parameters
     ///
-    /// - `ids`: One or more transaction IDs to delete. All specified transactions will be removed.
+    /// - `ids`: One or more sync IDs to delete. A sync ID is the primary key of a transaction and
+    ///   the value in the sheet's `TillerSyncID` column; it is not Tiller's own `Transaction ID`,
+    ///   which is not unique. All specified transactions will be removed.
     ///
     /// # Returns
     ///
     /// On success, returns a message indicating how many transactions were deleted and a JSON array
-    /// of the deleted transaction IDs.
+    /// of the deleted sync IDs.
     ///
     /// # Errors
     ///
-    /// - Returns an error if a transaction ID is not found.
+    /// - Returns an error if a sync ID is not found.
     /// - The operation is atomic: if any error occurs, all changes are rolled back and no
     ///   transactions are deleted.
     ///
@@ -508,9 +511,10 @@ impl TillerServer {
 
     /// Insert a new transaction into the local database.
     ///
-    /// This tool creates a new transaction in the local SQLite database. A unique transaction ID
-    /// is automatically generated with a `user-` prefix to distinguish it from Tiller-created
-    /// transactions. The generated ID is returned on success. Changes are NOT automatically synced
+    /// This tool creates a new transaction in the local SQLite database. A sync ID is minted for
+    /// the new row and returned; it is the identifier every other tool addresses the row by.
+    /// Tiller's own `Transaction ID` is left blank, because a locally-added row has never had
+    /// one. The generated ID is returned on success. Changes are NOT automatically synced
     /// to the Google Sheet - call `sync_up` to upload local changes.
     ///
     /// # Parameters
@@ -529,7 +533,7 @@ impl TillerServer {
     /// # Returns
     ///
     /// On success, returns a message indicating the transaction was inserted and the generated
-    /// transaction ID.
+    /// minted sync ID.
     ///
     /// # Example
     ///
@@ -793,7 +797,8 @@ impl TillerServer {
     ///
     /// The primary data tables are:
     ///
-    /// - `transactions`: Financial transactions with columns like `transaction_id`, `date`,
+    /// - `transactions`: Financial transactions with columns like `sync_id`, `transaction_id`,
+    ///   `date`,
     ///   `description`, `amount`, `category`, etc.
     /// - `categories`: Budget categories with `category`, `group`, `type`, and `hide_from_reports`.
     /// - `autocat`: Automatic categorization rules with filter criteria and override columns.
