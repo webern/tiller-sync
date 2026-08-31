@@ -267,9 +267,14 @@ During the `tiller sync down` call, the following happens.
 - If the datastore does not exist, it is created.
 - A backup of the SQLite database is created.
 - If more than `backup_copies` of the SQLite database exist, the extras are deleted.
-- Three tabs from the `sheet_url`, *Transactions*, *Categories*, and *AutoCat*
-- These are held in memory for further processing but also written out to
-  `$TILLER_HOME/.backups/sync-down.2025-11-09-001.json`.
+- Three tabs are fetched from the `sheet_url`: *Transactions*, *Categories*, and *AutoCat*.
+- The sync ID assignment phase runs against the Transactions tab, so that every row is known to
+  carry a unique `Tiller Sync ID` before anything reaches the database. See Sync ID Assignment
+  below.
+- The fetched data is held in memory for further processing but also written out to
+  `$TILLER_HOME/.backups/sync-down.2025-11-09-001.json`. This snapshot always reflects the sheet
+  *after* sync ID assignment, so that the next `tiller sync up` does not report the assignment as
+  a remote conflict.
 - If there are more than `backup_copies` of `sync-down.*.json` files, the oldest are deleted.
 - Each of three tables in tiller.sqlite is upserted with the downloaded values.
     - Rows will be added to the database for new rows found in the sheets.
@@ -278,6 +283,66 @@ During the `tiller sync down` call, the following happens.
     - Each row's `original_order` is set to its 0-indexed row position from the sheet.
 - Cell formulas are captured and stored in the `formulas` table for potential preservation
   during sync up.
+
+#### Sync ID Assignment
+
+Transactions are identified by the `Tiller Sync ID` column, which this tool owns and maintains. See
+Row IDs for what that column holds and why it exists.
+
+Assignment is a phase of `sync down` rather than a side effect of `sync up`, and it is the only
+part of `sync down` that writes to the Google Sheet. It has to be, because a sync ID that existed
+only in the local database would be lost on the next download: the sheet row would still be blank,
+it would be assigned a different ID, and the row held under the old ID would look deleted and
+re-added, taking whatever the user had categorized or annotated with it.
+
+The phase does nothing at all when every row in the Transactions tab already carries a non-blank,
+unique sync ID. In that steady state, which is the common one, `sync down` performs no writes.
+
+**Assigning an ID to each row:**
+
+- **The column is absent** — the first `sync down` after upgrading, or a sheet this tool has not
+  seen before. The `Tiller Sync ID` header is appended immediately right of the last existing
+  column, and every row is seeded. A row whose `Transaction ID` is non-blank and unique across the
+  whole tab is seeded with that value verbatim; every other row is minted. The bootstrap happens
+  once.
+- **The column is present.** Rows carrying a non-blank value keep it, unchanged. Rows with a blank
+  value — rows that Tiller or the user has added since the last `sync down` — are minted.
+- **Duplicate values.** `sync down` aborts and names each duplicated sync ID along with the 1-based
+  sheet row numbers carrying it. Picking a winner is not safe: Tiller inserts new rows at the top
+  of the tab, so a copied row can sit above its original, and choosing by position would transplant
+  the original's local edits onto the copy. The user resolves it by clearing the sync ID on the
+  rows that are genuinely new. A duplicated `Transaction ID` is not an error. During the
+  bootstrap it means those rows are minted rather than seeded, and afterwards that column is
+  ordinary data.
+
+**Writing the IDs back to the sheet:**
+
+- Only cells whose value changed are written: the new header cell, when the column was just
+  created, and the rows that received an ID, grouped into contiguous ranges. A cell that already
+  held the right value is never rewritten.
+- Immediately before writing, the `Tiller Sync ID`, `Transaction ID` and `Date` columns are
+  re-fetched and compared against what was read. A mismatch means the sheet changed underneath us
+  in the seconds since the read, so the positions we are about to write are no longer the rows we
+  computed them for. `sync down` aborts, and running it again picks up the new state.
+- After writing, the Transactions tab is re-fetched and checked: every row carries a non-blank,
+  unique sync ID, and the values are the ones intended. This re-fetch becomes the data the rest of
+  `sync down` works from, which is what makes the JSON snapshot an exact record of the sheet.
+- The sheet write completes and verifies before the SQLite transaction commits. The ordering
+  matters. If the write fails, nothing has been committed locally and the next `sync down` is a
+  clean retry. If the process dies after the write but before the commit, the IDs are already in
+  the sheet and the next `sync down` simply reads them.
+- When the phase creates the column, a Drive copy of the spreadsheet is taken first, by the same
+  mechanism `sync up` uses. Routine assignment of a few new rows takes no copy, because it writes
+  only cells that were empty.
+
+**Column placement.** The column is always appended to the right of every existing column, never
+inserted. Formulas are stored by absolute `(row, col)` position, so inserting a column would shift
+the column index of every formula at or to the right of it and silently misplace them on the next
+`sync up`.
+
+**Logging.** The phase reports at `info` how many IDs it assigned. On the bootstrap run it also
+reports that the column was created, and how many rows were seeded from `Transaction ID` as
+against minted.
 
 ### Up
 
@@ -366,6 +431,7 @@ dependencies on row/column ordering and provides predictable, repeatable results
         - Query all rows from corresponding SQLite table
         - Build header row from `sheet_metadata` table (preserves original column order and names)
         - Build data rows in consistent column order matching the headers
+        - The `Tiller Sync ID` column is written like any other column and is never omitted
         - Ensure calculated fields are populated (Month, Week for transactions)
         - Sort rows by `original_order ASC NULLS LAST`, then by primary key for determinism
         - Locally-added rows (NULL `original_order`) are appended at the end
@@ -464,46 +530,88 @@ tiller sync up --force
 
 ### Row IDs
 
+#### Sync IDs
+
+Transactions are identified by a synthetic key that this tool creates and owns, the sync ID. It is
+stored in the database as `transactions.sync_id` and in the Google Sheet in a column headed
+`Tiller Sync ID`.
+
+The sync ID exists because the `Transaction ID` column cannot serve as a key. Tiller writes rows
+with a blank `Transaction ID` — some feeds supply none at all — and rows that repeat a value,
+such as the split markers `split:[1]` and `split:[2]`, which carry no parent ID. A sheet like that
+cannot be loaded into a table that treats the column as a primary key.
+
+A sync ID is minted at random rather than derived from the row's contents:
+
+```text
+sync-f47e8c2a9b3d4f1ea80
+```
+
+This is a UUIDv4 with the dashes removed, truncated to 19 characters, and prepended with `sync-`.
+A newly minted ID is checked against the IDs already present in the sheet and in the database, and
+re-minted in the vanishingly unlikely event of a collision.
+
+Deriving the key from row content instead, by hashing the date, amount and description, is
+explicitly rejected. Any such key changes when the row it describes is edited, and a key that
+changes is a row that looks deleted and re-added, taking the user's local work with it.
+
+The sync IDs seeded during the bootstrap described under Sync ID Assignment are the exception to
+the `sync-` shape: they are the row's own Tiller `Transaction ID`, copied verbatim. Seeding this
+way means a sheet whose transaction IDs were already unique keeps every key it already had.
+Nothing is re-keyed, no row looks deleted and re-added, `original_order` is untouched, and stored
+formulas stay aligned. The same rule covers the local database when its schema is migrated: an
+existing row's sync ID is its current `transaction_id`, which the previous schema already required
+to be unique and non-blank.
+
+**Once assigned, a sync ID is never changed by this tool.** It is written to the sheet, read back
+unchanged on every subsequent `sync down`, and written back out on every `sync up`.
+
 #### Transaction IDs
 
-For the *Transactions* tab, we will use the `Transaction ID` column as our primary key in the
-database. When this column is populated with an ID that looks like the following:
+The `Transaction ID` column is Tiller's own identifier, and this tool treats it as ordinary data.
+It is stored in `transactions.transaction_id`, round-trips unchanged, and carries no uniqueness
+constraint. It may be blank and it may repeat.
+
+Tiller-provided values look like this:
 
 ```text
 69112cec0a57f52108456b88
 690edd882cac40d381f9e518
 690edd882cac40d381f9e519
-690edd882cac40d381f9e51a
-690edd882cac40d381f9e51b
 ```
 
-Then this is an ID created by, and provided by Tiller.
+Rows added locally with `tiller insert transaction` leave it blank. They are identified by their
+minted sync ID, like every other row.
 
-When we need to create our own IDs because we are adding rows, then they will look like this:
+#### The Sync ID Column Belongs To This Tool
 
-```text
-user-f47e8c2a9b3d4f1ea80
-```
+Editing `Tiller Sync ID` in the Google Sheet breaks the link between a sheet row and its local
+counterpart. The failure modes are worth stating plainly, because only the first is detectable:
 
-This is a UUIDv4 with the dashes removed, 13-characters removed at random, and prepended with
-`user-`.
+- **A duplicated sync ID**, usually a copy-pasted row, is caught. `sync down` aborts and names the
+  rows involved. See Sync ID Assignment.
+- **A cleared sync ID** is indistinguishable from a row Tiller has just added. It is assigned a new
+  ID, and on the next `sync down` the local row held under the old ID is deleted and a fresh row
+  inserted. Anything held only locally on that row — its category, note, or tags — is lost.
+- **An edited sync ID** behaves the same way. The old ID is gone from the sheet, so the local row
+  is deleted, and the new value is treated as a row this tool has not seen before.
 
-We will represent this with a Rust enum like this:
+Deleting the whole column is recoverable. The next `sync down` finds no column and runs the
+bootstrap again, seeding from `Transaction ID` where it can and minting for the rest. The rows that
+have to be minted lose their local-only fields.
 
-```rust
-enum IdType {
-    Tiller,
-    Local,
-}
+#### Identifying Rows Elsewhere
 
-struct TransactionId {
-    value: String,
-    id_type: IdType,
-}
-```
+The sync ID is the primary key, so it is what the CRUD commands and their MCP equivalents address
+rows by. `tiller update transactions --ids ...` and `tiller delete transactions --ids ...` take
+sync IDs, and `tiller insert transaction` returns the sync ID it minted. To find a row by its
+Tiller `Transaction ID`, query for it.
 
-- We will implement a `Default` function for this using the `uuid` crate that creates a `Local` ID.
-- We will implement Serialize and Deserialize
+#### Categories and AutoCat
+
+Neither tab has a sync ID. Categories are keyed by the category name, and AutoCat rows by a
+synthetic auto-increment that is reassigned on each `sync down`. Both tabs are replaced wholesale
+on `sync down` rather than upserted, so neither needs a stable identity to sync correctly.
 
 ## Database Schema
 
@@ -513,7 +621,8 @@ The SQLite database contains the following tables. See `src/db/migrations/` for 
 
 **transactions** - Financial transactions from the Tiller Transactions sheet.
 
-- Primary key: `transaction_id` (Tiller-assigned or `user-` prefixed local UUID)
+- Primary key: `sync_id` (the synthetic key this tool owns; see Row IDs)
+- `transaction_id` - Tiller's own identifier, stored as data. Not unique, and may be blank.
 - Indexed on: `date`, `account`, `category`, `description`
 - Foreign key: `category` references `categories(category)` with `ON UPDATE CASCADE ON DELETE
   RESTRICT`
