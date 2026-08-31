@@ -320,6 +320,19 @@ impl Sheet for TestSheet {
                 // render option, while the value render option shows the evaluated result. Record
                 // the incoming grid as the formula grid, then reduce it to values.
                 let written_values = evaluate(&sheet_range.values, state.data.get(sheet_name));
+
+                // A range that does not begin at column A touches part of the sheet rather than
+                // replacing it, which is how `sync down` stamps the sync ID column. Lay the cells
+                // over both grids at the anchor and leave everything else alone.
+                if let Some(anchor) = partial_anchor(&sheet_range.range) {
+                    let values = state.data.entry(sheet_name.to_string()).or_default();
+                    overlay(values, anchor, &written_values);
+                    if let Some(formulas) = state.formulas.get_mut(sheet_name) {
+                        overlay(formulas, anchor, &sheet_range.values);
+                    }
+                    continue;
+                }
+
                 state
                     .formulas
                     .insert(sheet_name.to_string(), sheet_range.values.clone());
@@ -376,6 +389,49 @@ impl Sheet for TestSheet {
         );
 
         Ok(fake_file_id)
+    }
+}
+
+/// The `(row, column)` a partial write starts at, both 0-based, or `None` when the range covers
+/// the sheet from column A and is handled by the replace-everything path.
+fn partial_anchor(range: &str) -> Option<(usize, usize)> {
+    let cells = range.split('!').nth(1)?;
+    let start = cells.split(':').next()?;
+
+    let split = start.find(|c: char| c.is_ascii_digit())?;
+    let (letters, digits) = start.split_at(split);
+    if letters.is_empty() || !letters.chars().all(|c| c.is_ascii_uppercase()) {
+        return None;
+    }
+
+    let mut col = 0usize;
+    for c in letters.chars() {
+        col = col * 26 + (c as usize - 'A' as usize + 1);
+    }
+    let col = col - 1;
+    let row: usize = digits.parse().ok()?;
+    if col == 0 || row == 0 {
+        return None;
+    }
+
+    Some((row - 1, col))
+}
+
+/// Writes `values` into `grid` starting at `anchor`, growing the grid as a real sheet would.
+fn overlay(grid: &mut SheetData, anchor: (usize, usize), values: &SheetData) {
+    let (start_row, start_col) = anchor;
+    for (row_offset, row) in values.iter().enumerate() {
+        let row_ix = start_row + row_offset;
+        if grid.len() <= row_ix {
+            grid.resize(row_ix + 1, Vec::new());
+        }
+        for (col_offset, cell) in row.iter().enumerate() {
+            let col_ix = start_col + col_offset;
+            if grid[row_ix].len() <= col_ix {
+                grid[row_ix].resize(col_ix + 1, String::new());
+            }
+            grid[row_ix][col_ix] = cell.clone();
+        }
     }
 }
 

@@ -18,13 +18,13 @@ use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Column, SqlitePool};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::str::FromStr;
 
 /// The target schema version for the database. This equals the highest migration number available.
 /// When `migration_05_up.sql` is the highest numbered migration, this should be `5`.
-pub(crate) const CURRENT_VERSION: i32 = 2;
+pub(crate) const CURRENT_VERSION: i32 = 3;
 
 /// Represents a row in the database in a table for which the primary key is not known in
 /// `TillerData`. Namely, rows from the `categories` and `autocats` tables.
@@ -145,12 +145,53 @@ impl Db {
         Ok(db)
     }
 
+    /// Creates a database file whose schema is at `version` rather than [`CURRENT_VERSION`].
+    ///
+    /// This exists so that tests can build a datastore the way an older release built it, and then
+    /// exercise the migration that brings it forward.
+    #[cfg(test)]
+    pub(crate) async fn create_at_version(path: impl AsRef<Path>, version: i32) -> Res<SqlitePool> {
+        let path = path.as_ref();
+        let options = SqliteConnectOptions::from_str(&format!("sqlite:{}", path.display()))
+            .context("Failed to parse SQLite connection string")?
+            .create_if_missing(true)
+            .pragma("foreign_keys", "ON");
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .context("Failed to create SQLite database")?;
+
+        sqlx::query("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+            .execute(&pool)
+            .await?;
+        sqlx::query("INSERT INTO schema_version (version) VALUES (0)")
+            .execute(&pool)
+            .await?;
+        migrations::run(&pool, 0, version).await?;
+
+        Ok(pool)
+    }
+
     /// Returns the number of rows in the transactions table.
     pub(crate) async fn count_transactions(&self) -> Res<u64> {
         let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM transactions")
             .fetch_one(&self.pool)
             .await?;
         Ok(row.0 as u64)
+    }
+
+    /// The sync IDs of every transaction the datastore holds.
+    ///
+    /// `sync down` passes these to the assignment phase so that an identifier minted for a new
+    /// sheet row cannot collide with one already in use locally.
+    pub(crate) async fn sync_ids(&self) -> Res<HashSet<String>> {
+        let rows: Vec<(String,)> = sqlx::query_as("SELECT sync_id FROM transactions")
+            .fetch_all(&self.pool)
+            .await
+            .context("Failed to read sync IDs")?;
+        Ok(rows.into_iter().map(|(id,)| id).collect())
     }
 
     /// Saves TillerData into the database.
@@ -196,25 +237,25 @@ impl Db {
     ) -> Res<()> {
         use sqlx::Row;
 
-        // Get existing transaction IDs for upsert logic
-        let existing_ids: Vec<String> = sqlx::query("SELECT transaction_id FROM transactions")
+        // Get existing sync IDs for upsert logic
+        let existing_ids: Vec<String> = sqlx::query("SELECT sync_id FROM transactions")
             .fetch_all(&mut **tx)
             .await?
             .iter()
-            .map(|row| row.get("transaction_id"))
+            .map(|row| row.get("sync_id"))
             .collect();
 
         let incoming_ids: std::collections::HashSet<&str> = data
             .transactions
             .data()
             .iter()
-            .map(|t| t.transaction_id.as_str())
+            .map(|t| t.sync_id.as_str())
             .collect();
 
         // Delete transactions that no longer exist
         for id in &existing_ids {
             if !incoming_ids.contains(id.as_str()) {
-                sqlx::query("DELETE FROM transactions WHERE transaction_id = ?")
+                sqlx::query("DELETE FROM transactions WHERE sync_id = ?")
                     .bind(id)
                     .execute(&mut **tx)
                     .await?;
@@ -225,7 +266,7 @@ impl Db {
         let existing_set: std::collections::HashSet<&str> =
             existing_ids.iter().map(|s| s.as_str()).collect();
         for transaction in data.transactions.data() {
-            if existing_set.contains(transaction.transaction_id.as_str()) {
+            if existing_set.contains(transaction.sync_id.as_str()) {
                 Self::update_transaction_impl(&mut **tx, transaction).await?;
             } else {
                 Self::insert_transaction_impl(&mut **tx, transaction).await?;
@@ -287,11 +328,11 @@ impl Db {
         // Query all transactions
         let rows = sqlx::query(
             r#"SELECT
-                transaction_id, date, description, amount, account, account_number,
+                sync_id, transaction_id, date, description, amount, account, account_number,
                 institution, month, week, full_description, account_id, check_number,
                 date_added, merchant_name, category_hint, category, note, tags,
                 categorized_date, statement, metadata, other_fields, original_order
-            FROM transactions ORDER BY original_order ASC NULLS LAST, transaction_id ASC"#,
+            FROM transactions ORDER BY original_order ASC NULLS LAST, sync_id ASC"#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -310,6 +351,7 @@ impl Db {
                 .unwrap_or(0.0);
 
             transactions_data.push(Transaction {
+                sync_id: r.get("sync_id"),
                 transaction_id: r.get("transaction_id"),
                 date: Date::parse(r.get::<&str, _>("date"))?,
                 description: r.get("description"),
@@ -555,8 +597,8 @@ impl Db {
                 institution = ?, month = ?, week = ?, full_description = ?, account_id = ?,
                 check_number = ?, date_added = ?, merchant_name = ?, category_hint = ?,
                 category = ?, note = ?, tags = ?, categorized_date = ?, statement = ?,
-                metadata = ?, other_fields = ?, original_order = ?
-            WHERE transaction_id = ?"#,
+                metadata = ?, other_fields = ?, original_order = ?, transaction_id = ?
+            WHERE sync_id = ?"#,
         )
         .bind(&txn.date)
         .bind(&txn.description)
@@ -581,6 +623,7 @@ impl Db {
         .bind(&other_fields_json)
         .bind(txn.original_order.map(|i| i as i64))
         .bind(&txn.transaction_id)
+        .bind(&txn.sync_id)
         .execute(executor)
         .await
         .context("Failed to update transaction")?;
@@ -603,11 +646,11 @@ impl Db {
 
         let row = sqlx::query(
             r#"SELECT
-                transaction_id, date, description, amount, account, account_number,
+                sync_id, transaction_id, date, description, amount, account, account_number,
                 institution, month, week, full_description, account_id, check_number,
                 date_added, merchant_name, category_hint, category, note, tags,
                 categorized_date, statement, metadata, other_fields, original_order
-            FROM transactions WHERE transaction_id = ?"#,
+            FROM transactions WHERE sync_id = ?"#,
         )
         .bind(id)
         .fetch_optional(executor)
@@ -631,6 +674,7 @@ impl Db {
                     .unwrap_or(0.0);
 
                 Ok(Some(Transaction {
+                    sync_id: r.get("sync_id"),
                     transaction_id: r.get("transaction_id"),
                     date: r.get("date"),
                     description: r.get("description"),
@@ -1135,7 +1179,7 @@ impl Db {
 
         let mut deleted = Vec::new();
         for id in args.ids() {
-            let result = sqlx::query("DELETE FROM transactions WHERE transaction_id = ?")
+            let result = sqlx::query("DELETE FROM transactions WHERE sync_id = ?")
                 .bind(id)
                 .execute(&mut *db_txn)
                 .await
@@ -1174,12 +1218,13 @@ impl Db {
 
         sqlx::query(
             r#"INSERT INTO transactions (
-                transaction_id, date, description, amount, account, account_number,
+                sync_id, transaction_id, date, description, amount, account, account_number,
                 institution, month, week, full_description, account_id, check_number,
                 date_added, merchant_name, category_hint, category, note, tags,
                 categorized_date, statement, metadata, other_fields, original_order
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
+        .bind(&txn.sync_id)
         .bind(&txn.transaction_id)
         .bind(&txn.date)
         .bind(&txn.description)
@@ -1886,8 +1931,8 @@ mod tests {
 
         // Insert a transaction directly
         sqlx::query(
-            "INSERT INTO transactions (transaction_id, date, description, amount, account, account_number, institution, account_id)
-             VALUES ('txn-001', '2025-01-15', 'Coffee Shop', -4.50, 'Checking', '1234', 'Test Bank', 'acct-001')"
+            "INSERT INTO transactions (sync_id, transaction_id, date, description, amount, account, account_number, institution, account_id)
+             VALUES ('sync-txn-001', 'txn-001', '2025-01-15', 'Coffee Shop', -4.50, 'Checking', '1234', 'Test Bank', 'acct-001')"
         )
         .execute(&db.pool)
         .await
@@ -1895,6 +1940,7 @@ mod tests {
 
         // Update via the method
         let mut transaction = Transaction::default();
+        transaction.sync_id = "sync-txn-001".to_string();
         transaction.transaction_id = "txn-001".to_string();
         transaction.date = "2025-01-15".try_into().unwrap();
         transaction.description = "Updated Description".to_string();
@@ -1924,14 +1970,14 @@ mod tests {
 
         // Insert a transaction directly
         sqlx::query(
-            "INSERT INTO transactions (transaction_id, date, description, amount, account, account_number, institution, account_id)
-             VALUES ('txn-001', '2025-01-15', 'Coffee Shop', -4.50, 'Checking', '1234', 'Test Bank', 'acct-001')"
+            "INSERT INTO transactions (sync_id, transaction_id, date, description, amount, account, account_number, institution, account_id)
+             VALUES ('sync-txn-001', 'txn-001', '2025-01-15', 'Coffee Shop', -4.50, 'Checking', '1234', 'Test Bank', 'acct-001')"
         )
         .execute(&db.pool)
         .await
         .unwrap();
 
-        let transaction = db._get_transaction("txn-001").await.unwrap();
+        let transaction = db._get_transaction("sync-txn-001").await.unwrap();
 
         assert!(transaction.is_some());
         let transaction = transaction.unwrap();
@@ -2189,6 +2235,7 @@ mod tests {
         let db = Db::init(&db_path).await.unwrap();
 
         let mut transaction = Transaction::default();
+        transaction.sync_id = "sync-txn-other".to_string();
         transaction.transaction_id = "txn-other".to_string();
         transaction.date = "2025-01-15".try_into().unwrap();
         transaction.description = "Test".to_string();
@@ -2203,7 +2250,11 @@ mod tests {
         db.insert_transaction(&transaction).await.unwrap();
 
         // Retrieve and verify other_fields was stored
-        let retrieved = db._get_transaction("txn-other").await.unwrap().unwrap();
+        let retrieved = db
+            ._get_transaction("sync-txn-other")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             retrieved.other_fields.get("Custom Column"),
             Some(&"custom value".to_string())

@@ -66,12 +66,16 @@ impl TestEnv {
 
     /// Inserts test transaction data into the database.
     ///
-    /// Creates a transaction with the given ID along with the categories needed
-    /// to satisfy foreign key constraints.
-    pub async fn insert_test_transaction(&self, transaction_id: &str) {
+    /// Creates a transaction with the given sync ID along with the categories needed
+    /// to satisfy foreign key constraints. The sync ID is the primary key, so it is what the
+    /// CRUD commands address the row by. Tiller's own `Transaction ID` is given the same value,
+    /// which is what the bootstrap in `model::sync_id` produces for a row whose transaction ID
+    /// was already unique.
+    pub async fn insert_test_transaction(&self, sync_id: &str) {
         let transactions = Transactions::parse(
             vec![
                 vec![
+                    crate::model::SYNC_ID_STR,
                     "Transaction ID",
                     "Date",
                     "Description",
@@ -84,7 +88,8 @@ impl TestEnv {
                     "Note",
                 ],
                 vec![
-                    transaction_id,
+                    sync_id,
+                    sync_id,
                     "2025-01-15",
                     "Coffee Shop",
                     "-4.50",

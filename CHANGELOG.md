@@ -9,6 +9,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `sync down` no longer aborts against an ordinary Tiller sheet. Transactions are now keyed on a
+  synthetic identifier this tool assigns and owns, so a blank or repeated `Transaction ID` — which
+  Tiller produces routinely, on feeds supplying no ID and on `split:[1]` markers — is ordinary data
+  rather than a `UNIQUE constraint failed` crash. [#37]
 - `tiller query` and `tiller schema` now write their results to `stdout` instead of discarding them.
   [#36]
 - `--other-field` on the `insert` and `update` subcommands is now optional and no longer panics when
@@ -22,6 +26,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- A `Tiller Sync ID (do not edit)` column in the Transactions tab, holding the identifier each row
+  is known by. `sync down` fills it in for any row that lacks one, and does not write to the sheet
+  at all once every row is identified. A sheet whose `Transaction ID` values were already unique
+  keeps the identity it had: each row's identifier is seeded from the value it already carried, so
+  no row is re-keyed by the upgrade. [#37]
+- `sync down` reports, rather than adopts, a column that was already in the sheet under that
+  header, and names the rows whose identifiers repeat. [#37]
 - `sync up` reports how many formulas were written and reads the sheet back to check that they
   landed, warning if the counts disagree. [#35]
 - Negative amounts can now be given as `--amount -12.34` instead of only `--amount=-12.34`. [#41]
@@ -30,6 +41,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **BREAKING:** `tiller update transactions --ids`, `tiller delete transactions --ids`, and their
+  MCP equivalents now take sync IDs rather than Tiller's `Transaction ID`. `tiller insert
+  transaction` returns the sync ID it minted and leaves `Transaction ID` blank. To find a row by
+  its Tiller `Transaction ID`, query for it. [#37]
+- **BREAKING:** The `transactions` table is keyed on a new `sync_id` column; `transaction_id`
+  remains as ordinary data with no uniqueness constraint. Existing databases migrate in place on
+  first use. [#37]
 - Update dependencies, including major-version upgrades of `rmcp` (0.12 to 3) and `sqlx` (0.8 to
   0.9)
 
@@ -111,4 +129,5 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [#35]: https://github.com/webern/tiller-sync/issues/35
 [#36]: https://github.com/webern/tiller-sync/issues/36
 [#40]: https://github.com/webern/tiller-sync/issues/40
+[#37]: https://github.com/webern/tiller-sync/issues/37
 [#41]: https://github.com/webern/tiller-sync/issues/41

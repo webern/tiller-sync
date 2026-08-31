@@ -205,7 +205,7 @@ mod tests {
         // After sync_down, we have transactions in the database. Get one to update.
         let tiller_data = env.config().db().get_tiller_data().await.unwrap();
         let first_txn = &tiller_data.transactions.data()[0];
-        let txn_id = first_txn.transaction_id.clone();
+        let txn_id = first_txn.sync_id.clone();
         let updates = crate::model::TransactionUpdates {
             note: Some("Updated via MCP".to_string()),
             ..Default::default()

@@ -269,8 +269,8 @@ During the `tiller sync down` call, the following happens.
 - If more than `backup_copies` of the SQLite database exist, the extras are deleted.
 - Three tabs are fetched from the `sheet_url`: *Transactions*, *Categories*, and *AutoCat*.
 - The sync ID assignment phase runs against the Transactions tab, so that every row is known to
-  carry a unique `Tiller Sync ID` before anything reaches the database. See Sync ID Assignment
-  below.
+  carry a unique `Tiller Sync ID (do not edit)` value before anything reaches the database. See
+  Sync ID Assignment below.
 - The fetched data is held in memory for further processing but also written out to
   `$TILLER_HOME/.backups/sync-down.2025-11-09-001.json`. This snapshot always reflects the sheet
   *after* sync ID assignment, so that the next `tiller sync up` does not report the assignment as
@@ -286,8 +286,8 @@ During the `tiller sync down` call, the following happens.
 
 #### Sync ID Assignment
 
-Transactions are identified by the `Tiller Sync ID` column, which this tool owns and maintains. See
-Row IDs for what that column holds and why it exists.
+Transactions are identified by the `Tiller Sync ID (do not edit)` column, which this tool owns
+and maintains. See Row IDs for what that column holds and why it exists.
 
 Assignment is a phase of `sync down` rather than a side effect of `sync up`, and it is the only
 part of `sync down` that writes to the Google Sheet. It has to be, because a sync ID that existed
@@ -301,10 +301,10 @@ unique sync ID. In that steady state, which is the common one, `sync down` perfo
 **Assigning an ID to each row:**
 
 - **The column is absent** — the first `sync down` after upgrading, or a sheet this tool has not
-  seen before. The `Tiller Sync ID` header is appended immediately right of the last existing
-  column, and every row is seeded. A row whose `Transaction ID` is non-blank and unique across the
-  whole tab is seeded with that value verbatim; every other row is minted. The bootstrap happens
-  once.
+  seen before. The `Tiller Sync ID (do not edit)` header is appended immediately right of the
+  last existing column, and every row is seeded. A row whose `Transaction ID` is non-blank and
+  unique across the whole tab is seeded from that value; every other row is minted. The bootstrap
+  happens once.
 - **The column is present.** Rows carrying a non-blank value keep it, unchanged. Rows with a blank
   value — rows that Tiller or the user has added since the last `sync down` — are minted.
 - **Duplicate values.** `sync down` aborts and names each duplicated sync ID along with the 1-based
@@ -320,10 +320,11 @@ unique sync ID. In that steady state, which is the common one, `sync down` perfo
 - Only cells whose value changed are written: the new header cell, when the column was just
   created, and the rows that received an ID, grouped into contiguous ranges. A cell that already
   held the right value is never rewritten.
-- Immediately before writing, the `Tiller Sync ID`, `Transaction ID` and `Date` columns are
-  re-fetched and compared against what was read. A mismatch means the sheet changed underneath us
-  in the seconds since the read, so the positions we are about to write are no longer the rows we
-  computed them for. `sync down` aborts, and running it again picks up the new state.
+- Immediately before writing, the `Tiller Sync ID (do not edit)`, `Transaction ID` and `Date`
+  columns are re-fetched and compared against what was read. A mismatch means the sheet changed
+  underneath us in the seconds since the read, so the positions we are about to write are no
+  longer the rows we computed them for. `sync down` aborts, and running it again picks up the new
+  state.
 - After writing, the Transactions tab is re-fetched and checked: every row carries a non-blank,
   unique sync ID, and the values are the ones intended. This re-fetch becomes the data the rest of
   `sync down` works from, which is what makes the JSON snapshot an exact record of the sheet.
@@ -431,7 +432,8 @@ dependencies on row/column ordering and provides predictable, repeatable results
         - Query all rows from corresponding SQLite table
         - Build header row from `sheet_metadata` table (preserves original column order and names)
         - Build data rows in consistent column order matching the headers
-        - The `Tiller Sync ID` column is written like any other column and is never omitted
+        - The `Tiller Sync ID (do not edit)` column is written like any other column, never
+          omitted
         - Ensure calculated fields are populated (Month, Week for transactions)
         - Sort rows by `original_order ASC NULLS LAST`, then by primary key for determinism
         - Locally-added rows (NULL `original_order`) are appended at the end
@@ -534,34 +536,43 @@ tiller sync up --force
 
 Transactions are identified by a synthetic key that this tool creates and owns, the sync ID. It is
 stored in the database as `transactions.sync_id` and in the Google Sheet in a column headed
-`Tiller Sync ID`.
+`Tiller Sync ID (do not edit)`.
 
 The sync ID exists because the `Transaction ID` column cannot serve as a key. Tiller writes rows
 with a blank `Transaction ID` — some feeds supply none at all — and rows that repeat a value,
 such as the split markers `split:[1]` and `split:[2]`, which carry no parent ID. A sheet like that
 cannot be loaded into a table that treats the column as a primary key.
 
-A sync ID is minted at random rather than derived from the row's contents:
+Every sync ID begins with `sync-`. A minted one looks like this:
 
 ```text
 sync-f47e8c2a9b3d4f1ea80
 ```
 
-This is a UUIDv4 with the dashes removed, truncated to 19 characters, and prepended with `sync-`.
-A newly minted ID is checked against the IDs already present in the sheet and in the database, and
+That is a UUIDv4 with the dashes removed, truncated to 19 characters, behind the prefix. A newly
+minted ID is checked against the IDs already present in the sheet and in the database, and
 re-minted in the vanishingly unlikely event of a collision.
+
+The prefix is what lets `sync down` tell its own identifiers apart from somebody else's data, so
+it is carried by every sync ID without exception, including the seeded ones described below. A
+non-blank value in the column that does not have the shape of an identifier this tool would have
+written is reported rather than adopted. See The Sync ID Column Belongs To This Tool.
 
 Deriving the key from row content instead, by hashing the date, amount and description, is
 explicitly rejected. Any such key changes when the row it describes is edited, and a key that
 changes is a row that looks deleted and re-added, taking the user's local work with it.
 
-The sync IDs seeded during the bootstrap described under Sync ID Assignment are the exception to
-the `sync-` shape: they are the row's own Tiller `Transaction ID`, copied verbatim. Seeding this
-way means a sheet whose transaction IDs were already unique keeps every key it already had.
-Nothing is re-keyed, no row looks deleted and re-added, `original_order` is untouched, and stored
-formulas stay aligned. The same rule covers the local database when its schema is migrated: an
-existing row's sync ID is its current `transaction_id`, which the previous schema already required
-to be unique and non-blank.
+A sync ID seeded during the bootstrap described under Sync ID Assignment is the row's own Tiller
+`Transaction ID` behind the same prefix: a row whose `Transaction ID` is `69112cec0a57f52108456b88`
+is seeded with `sync-69112cec0a57f52108456b88`. Seeding this way means a sheet whose transaction
+IDs were already unique keeps the identity it already had. Nothing is re-keyed, no row looks
+deleted and re-added, `original_order` is untouched, and stored formulas stay aligned. The same
+rule covers the local database when its schema is migrated: an existing row's sync ID is derived
+from its current `transaction_id`, which the previous schema already required to be unique and
+non-blank, so the database and the sheet arrive at the same answer independently.
+
+A `Transaction ID` that cannot go behind the prefix — one holding a character outside
+`[A-Za-z0-9_-]`, such as the `split:[1]` markers — seeds nothing, and its row is minted.
 
 **Once assigned, a sync ID is never changed by this tool.** It is written to the sheet, read back
 unchanged on every subsequent `sync down`, and written back out on every `sync up`.
@@ -585,16 +596,24 @@ minted sync ID, like every other row.
 
 #### The Sync ID Column Belongs To This Tool
 
-Editing `Tiller Sync ID` in the Google Sheet breaks the link between a sheet row and its local
-counterpart. The failure modes are worth stating plainly, because only the first is detectable:
+Editing `Tiller Sync ID (do not edit)` in the Google Sheet breaks the link between a sheet row
+and its local counterpart. The failure modes are worth stating plainly, because only the first
+three are detectable:
 
+- **A column that was already in the sheet** under this header, holding the user's own data, is
+  caught. Its values do not have the shape of a sync ID, so `sync down` aborts, names the rows
+  holding them, and asks the user to rename their column. The header is deliberately wordy to make
+  this collision unlikely in the first place.
 - **A duplicated sync ID**, usually a copy-pasted row, is caught. `sync down` aborts and names the
   rows involved. See Sync ID Assignment.
+- **An edited sync ID that no longer has the `sync-` shape** is caught the same way a pre-existing
+  column is, and reported with the same message.
 - **A cleared sync ID** is indistinguishable from a row Tiller has just added. It is assigned a new
   ID, and on the next `sync down` the local row held under the old ID is deleted and a fresh row
   inserted. Anything held only locally on that row — its category, note, or tags — is lost.
-- **An edited sync ID** behaves the same way. The old ID is gone from the sheet, so the local row
-  is deleted, and the new value is treated as a row this tool has not seen before.
+- **An edited sync ID that still looks like one** behaves the same way as a cleared one. The old
+  ID is gone from the sheet, so the local row is deleted, and the new value is treated as a row
+  this tool has not seen before.
 
 Deleting the whole column is recoverable. The next `sync down` finds no column and runs the
 bootstrap again, seeding from `Transaction ID` where it can and minting for the rest. The rows that

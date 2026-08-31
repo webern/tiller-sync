@@ -3,14 +3,17 @@
 use crate::args::{InsertAutoCatArgs, InsertCategoryArgs, InsertTransactionArgs};
 use crate::commands::Out;
 use crate::error::{ErrorType, IntoResult};
+use crate::model::mint_sync_id;
 use crate::model::{AutoCat, Category, Transaction};
-use crate::utils::{self, generate_transaction_id};
+use crate::utils;
 use crate::{Config, Result};
 
 /// Inserts a new transaction into the local SQLite database.
 ///
-/// A unique transaction ID is automatically generated with a `user-` prefix to distinguish it
-/// from Tiller-created transactions. The generated ID is returned on success.
+/// A sync ID is minted for the new row and returned on success. It is the identifier the row is
+/// known by everywhere else: `tiller update transactions --ids`, `tiller delete transactions
+/// --ids`, and the `Tiller Sync ID (do not edit)` column of the Google Sheet. Tiller's own
+/// `Transaction ID` is left blank, because a locally-added row has never had one.
 ///
 /// # Arguments
 ///
@@ -22,7 +25,7 @@ use crate::{Config, Result};
 ///
 /// On success, returns an `Out` containing:
 /// - A message indicating the transaction was inserted.
-/// - The generated transaction ID.
+/// - The minted sync ID.
 ///
 /// # Errors
 ///
@@ -32,12 +35,14 @@ pub async fn insert_transaction(
     config: Config,
     args: InsertTransactionArgs,
 ) -> Result<Out<String>> {
-    // Generate a unique transaction ID
-    let transaction_id = generate_transaction_id();
+    // Mint the synthetic identifier that this row will be known by. Tiller's own `Transaction ID`
+    // is left blank: it belongs to Tiller, and a locally-added row has never had one.
+    let sync_id = mint_sync_id();
 
     // Build the Transaction object from args
     let transaction = Transaction {
-        transaction_id: transaction_id.clone(),
+        sync_id: sync_id.clone(),
+        transaction_id: String::new(),
         date: args.date,
         amount: args.amount,
         description: args.description.unwrap_or_default(),
@@ -83,8 +88,8 @@ pub async fn insert_transaction(
         })
         .pub_result(ErrorType::Database)?;
 
-    let message = format!("Inserted transaction with ID: {}", transaction_id);
-    Ok(Out::new(message, transaction_id))
+    let message = format!("Inserted transaction with sync ID: {}", sync_id);
+    Ok(Out::new(message, sync_id))
 }
 
 /// Inserts a new category into the local SQLite database.
@@ -239,13 +244,13 @@ mod tests {
 
         assert!(result.is_ok());
         let out = result.unwrap();
-        assert!(out.message().contains("Inserted transaction with ID:"));
+        assert!(out.message().contains("Inserted transaction with sync ID:"));
 
-        // Verify the ID starts with "user-"
+        // Verify the ID is a minted sync ID
         let id = out.structure().unwrap();
         assert!(
-            id.starts_with("user-"),
-            "Expected ID to start with 'user-', got: {}",
+            id.starts_with("sync-"),
+            "Expected ID to start with 'sync-', got: {}",
             id
         );
 
@@ -379,8 +384,8 @@ mod tests {
         let id2 = result2.structure().unwrap();
 
         assert_ne!(id1, id2, "Generated IDs should be unique");
-        assert!(id1.starts_with("user-"));
-        assert!(id2.starts_with("user-"));
+        assert!(id1.starts_with("sync-"));
+        assert!(id2.starts_with("sync-"));
     }
 
     #[tokio::test]

@@ -21,8 +21,14 @@ pub type Transactions = Items<Transaction>;
 #[derive(Default, Debug, Clone, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct Transaction {
+    /// The synthetic identifier that this tool assigns and owns. It is the primary key of the
+    /// `transactions` table and lives in the Google Sheet in the `Tiller Sync ID (do not edit)`
+    /// column. Do not edit it in the sheet.
+    pub(crate) sync_id: String,
+
     /// A unique ID assigned to the transaction by Tiller's systems. Critical for support
-    /// troubleshooting and must not be deleted.
+    /// troubleshooting and must not be deleted. Tiller leaves it blank on some feeds and repeats
+    /// it on others, so it is stored as ordinary data and is not a key.
     pub(crate) transaction_id: String,
 
     /// The posted date (when the transaction cleared) or transaction date (when the transaction
@@ -115,6 +121,7 @@ impl Item for Transaction {
 
         match TransactionColumn::from_header(header) {
             Ok(col) => match col {
+                TransactionColumn::SyncId => self.sync_id = value,
                 TransactionColumn::TransactionId => self.transaction_id = value,
                 TransactionColumn::Date => self.date = Date::parse(value)?,
                 TransactionColumn::Description => self.description = value,
@@ -152,6 +159,7 @@ impl Item for Transaction {
     fn get_by_header(&self, header: &str) -> String {
         match TransactionColumn::from_header(header) {
             Ok(col) => match col {
+                TransactionColumn::SyncId => self.sync_id.clone(),
                 TransactionColumn::TransactionId => self.transaction_id.clone(),
                 TransactionColumn::Date => self.date.d_to_s(Y::Y4),
                 TransactionColumn::Description => self.description.clone(),
@@ -279,8 +287,12 @@ impl Transaction {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum TransactionColumn {
+    /// The synthetic identifier that this tool assigns and owns. It is the primary key of the
+    /// `transactions` table. Do not edit it in the sheet.
+    SyncId,
     /// A unique ID assigned to the transaction by Tiller's systems. Critical for support
-    /// troubleshooting and must not be deleted.
+    /// troubleshooting and must not be deleted. Tiller leaves it blank on some feeds and repeats
+    /// it on others, so it is stored as ordinary data and is not a key.
     #[default]
     TransactionId,
     /// The posted date (when the transaction cleared) or transaction date (when the transaction
@@ -341,6 +353,7 @@ impl TransactionColumn {
     pub fn from_header(header: impl AsRef<str>) -> Res<TransactionColumn> {
         let header_str = header.as_ref();
         match header_str {
+            SYNC_ID_STR => Ok(TransactionColumn::SyncId),
             TRANSACTION_ID_STR => Ok(TransactionColumn::TransactionId),
             DATE_STR => Ok(TransactionColumn::Date),
             DESCRIPTION_STR => Ok(TransactionColumn::Description),
@@ -370,6 +383,7 @@ impl TransactionColumn {
     /// Returns the header string for this column (e.g., "Note", "Category").
     pub fn to_header(&self) -> &'static str {
         match self {
+            TransactionColumn::SyncId => SYNC_ID_STR,
             TransactionColumn::TransactionId => TRANSACTION_ID_STR,
             TransactionColumn::Date => DATE_STR,
             TransactionColumn::Description => DESCRIPTION_STR,
@@ -535,6 +549,10 @@ pub struct TransactionUpdates {
     pub other_fields: Vec<(String, String)>,
 }
 
+/// The header of the column that this tool owns in the Transactions tab. It is deliberately
+/// wordy: the name has to be one that no existing sheet is likely to have used already, and it
+/// has to tell anyone looking at the sheet to leave the column alone.
+pub(crate) const SYNC_ID_STR: &str = "Tiller Sync ID (do not edit)";
 pub(super) const TRANSACTION_ID_STR: &str = "Transaction ID";
 pub(super) const DATE_STR: &str = "Date";
 pub(super) const DESCRIPTION_STR: &str = "Description";

@@ -369,8 +369,9 @@ pub enum UpdateSubcommand {
 // rather than as an unknown flag.
 #[command(allow_negative_numbers = true)]
 pub struct UpdateTransactionsArgs {
-    /// One or more transaction IDs to update. All specified transactions will receive the same
-    /// updates.
+    /// One or more sync IDs to update. All specified transactions will receive the same updates.
+    /// A sync ID is the value in the `Tiller Sync ID (do not edit)` column, not Tiller's own
+    /// `Transaction ID`; to find a row by the latter, query for it.
     #[arg(long, num_args = 1..)]
     ids: Vec<String>,
 
@@ -564,7 +565,9 @@ pub enum DeleteSubcommand {
 /// yet, you can restore the transactions by running `sync down` to re-download from the sheet.
 #[derive(Debug, Parser, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DeleteTransactionsArgs {
-    /// One or more transaction IDs to delete.
+    /// One or more sync IDs to delete. A sync ID is the value in the `Tiller Sync ID (do not
+    /// edit)` column, not Tiller's own `Transaction ID`; to find a row by the latter, query for
+    /// it.
     #[arg(long = "id", required = true)]
     ids: Vec<String>,
 }
@@ -681,8 +684,8 @@ impl InsertArgs {
 pub enum InsertSubcommand {
     /// Inserts a new transaction into the local SQLite database.
     ///
-    /// A unique transaction ID is automatically generated with a `user-` prefix to distinguish it
-    /// from Tiller-created transactions. The generated ID is returned on success.
+    /// A sync ID is minted for the new row and returned. Tiller's own `Transaction ID` is left
+    /// blank, because a locally-added row has never had one. The generated ID is returned on success.
     ///
     /// The `date` and `amount` fields are required. All other fields are optional.
     ///
@@ -711,8 +714,8 @@ pub enum InsertSubcommand {
 
 /// Args for the `tiller insert transaction` command.
 ///
-/// Inserts a new transaction into the local SQLite database. A unique transaction ID is
-/// automatically generated with a `user-` prefix.
+/// Inserts a new transaction into the local SQLite database. A sync ID is minted for the new row
+/// and returned.
 ///
 /// The `date` and `amount` fields are required. All other fields are optional.
 ///

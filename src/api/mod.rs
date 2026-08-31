@@ -121,10 +121,29 @@ pub trait Sheet: Send {
     async fn copy_spreadsheet(&mut self, new_name: &str) -> Res<String>;
 }
 
+/// Whether a fetch of the Transactions tab should assign sync IDs to the rows that lack one.
+///
+/// Assignment is a phase of `sync down` and the only part of it that writes to the Google Sheet.
+/// A `sync up` reads the sheet to detect conflicts and to verify its own write, and must leave it
+/// alone while doing so.
+#[derive(Debug, Clone, Copy)]
+pub enum SyncIds<'a> {
+    /// Read the Transactions tab as it stands, writing nothing.
+    Read,
+    /// Give every row that lacks a sync ID one, and write the new identifiers into the sheet.
+    ///
+    /// The set holds the sync IDs the local datastore already knows, so that a freshly minted
+    /// identifier cannot collide with one that is already in use.
+    Assign(&'a std::collections::HashSet<String>),
+}
+
 #[async_trait::async_trait]
 pub trait Tiller {
     /// Get the data from the Tiller Google sheet.
-    async fn get_data(&mut self) -> Res<TillerData>;
+    ///
+    /// When `sync_ids` is [`SyncIds::Assign`] the Transactions tab is stamped with any missing
+    /// sync IDs before the returned data is read back. See `model::sync_id`.
+    async fn get_data(&mut self, sync_ids: SyncIds<'_>) -> Res<TillerData>;
 
     /// Create a backup copy of the spreadsheet.
     /// Returns the file ID of the new copy.
@@ -170,7 +189,7 @@ async fn test_sync_down_behavior() {
 
     let client = Box::new(TestSheet::new_with_seed_data("test_sync_down_behavior"));
     let mut tiller = crate::api::tiller(client).await.unwrap();
-    let tiller_data = tiller.get_data().await.unwrap();
+    let tiller_data = tiller.get_data(SyncIds::Read).await.unwrap();
 
     // Check that the test data is coming through correctly with an =ABS(E1) formula in
     // Custom Column
